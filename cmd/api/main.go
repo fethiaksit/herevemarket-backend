@@ -25,6 +25,8 @@ func main() {
 
 	r := gin.Default()
 
+	r.GET("/", handlers.Home())
+
 	r.POST("/admin/login", handlers.AdminLogin(db, cfg.JWTSecret))
 
 	r.GET("/products", handlers.GetProducts(db))
