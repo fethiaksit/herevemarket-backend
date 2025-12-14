@@ -8,6 +8,6 @@ type Env struct {
 
 var AppEnv = Env{
 	MongoURI:  "mongodb://localhost:27017",
-	DBName:    "docker-mongo",
+	DBName:    "docker-herevemarket",
 	JWTSecret: "MgGYQBvqZodV4sPFJaC6XRbspRiklcs6OmHG714ynxk",
 }

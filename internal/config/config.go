@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 type Config struct {
 	MongoURI  string
@@ -10,6 +13,7 @@ type Config struct {
 
 func Load() Config {
 	return Config{
+
 		MongoURI:  getEnvOrDefault("MONGO_URI", AppEnv.MongoURI),
 		DBName:    getEnvOrDefault("DB_NAME", AppEnv.DBName),
 		JWTSecret: getEnvOrDefault("JWT_SECRET", AppEnv.JWTSecret),
@@ -17,9 +21,8 @@ func Load() Config {
 }
 
 func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 		return value
 	}
-
 	return defaultValue
 }
