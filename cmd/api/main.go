@@ -28,6 +28,7 @@ func main() {
 	r.POST("/admin/login", handlers.AdminLogin(db, cfg.JWTSecret))
 
 	r.GET("/products", handlers.GetProducts(db))
+	r.GET("/categories", handlers.GetCategories(db))
 
 	admin := r.Group("/admin")
 	admin.Use(middleware.AdminAuth(cfg.JWTSecret))
@@ -40,6 +41,11 @@ func main() {
 		admin.POST("/products", handlers.CreateProduct(db))
 		admin.PUT("/products/:id", handlers.UpdateProduct(db))
 		admin.DELETE("/products/:id", handlers.DeleteProduct(db))
+
+		admin.GET("/categories", handlers.GetAllCategories(db))
+		admin.POST("/categories", handlers.CreateCategory(db))
+		admin.PUT("/categories/:id", handlers.UpdateCategory(db))
+		admin.DELETE("/categories/:id", handlers.DeleteCategory(db))
 	}
 
 	r.Run(":8080")
