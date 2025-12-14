@@ -27,13 +27,19 @@ func main() {
 
 	r.POST("/admin/login", handlers.AdminLogin(db, cfg.JWTSecret))
 
+	r.GET("/products", handlers.GetProducts(db))
+
 	admin := r.Group("/admin")
 	admin.Use(middleware.AdminAuth(cfg.JWTSecret))
 	{
 		admin.GET("/me", func(c *gin.Context) {
 			c.JSON(200, gin.H{"ok": true})
 		})
-		r.GET("/products", handlers.GetProducts(db))
+
+		admin.GET("/products", handlers.GetAllProducts(db))
+		admin.POST("/products", handlers.CreateProduct(db))
+		admin.PUT("/products/:id", handlers.UpdateProduct(db))
+		admin.DELETE("/products/:id", handlers.DeleteProduct(db))
 	}
 
 	r.Run(":8080")
