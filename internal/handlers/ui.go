@@ -4,9 +4,9 @@ import "github.com/gin-gonic/gin"
 
 // Home renders a lightweight HTML landing page to help humans explore the API without other tooling.
 func Home() gin.HandlerFunc {
-        return func(c *gin.Context) {
-                c.Header("Content-Type", "text/html; charset=utf-8")
-                c.String(200, `<!doctype html>
+	return func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(200, `<!doctype html>
 <html lang="tr">
 <head>
   <meta charset="UTF-8" />
@@ -268,18 +268,23 @@ func Home() gin.HandlerFunc {
 
     const renderList = (items, container, type) => {
       if (!Array.isArray(items) || items.length === 0) {
-        container.textContent = `${type} bulunamadı.`;
+        container.textContent = type + ' bulunamadı.';
         return;
       }
-      container.innerHTML = items.map((item) => `
-        <div class="card">
-          <h4>${item.name || 'İsimsiz'}</h4>
-          ${item.price ? `<div><strong>Fiyat:</strong> ${item.price}</div>` : ''}
-          ${item.category ? `<div><strong>Kategori:</strong> ${item.category}</div>` : ''}
-          <small>ID: ${item._id || item.id || '-'}</small>
-          <small>Aktif: ${item.isActive}</small>
-        </div>
-      `).join('');
+      container.innerHTML = items.map((item) => {
+        const priceBlock = item.price ? '<div><strong>Fiyat:</strong> ' + item.price + '</div>' : '';
+        const categoryBlock = item.category ? '<div><strong>Kategori:</strong> ' + item.category + '</div>' : '';
+        const idValue = item._id || item.id || '-';
+        return [
+          '<div class="card">',
+          '<h4>' + (item.name || 'İsimsiz') + '</h4>',
+          priceBlock,
+          categoryBlock,
+          '<small>ID: ' + idValue + '</small>',
+          '<small>Aktif: ' + item.isActive + '</small>',
+          '</div>',
+        ].join('');
+      }).join('');
     };
 
     const fetchCategories = async () => {
@@ -310,7 +315,7 @@ func Home() gin.HandlerFunc {
         method,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`,
+          'Authorization': 'Bearer ' + authToken,
         },
         body: body ? JSON.stringify(body) : undefined,
       });
@@ -367,7 +372,7 @@ func Home() gin.HandlerFunc {
       if (name) body.name = name;
       if (isActiveRaw) body.isActive = isActiveRaw === 'true';
       try {
-        const result = await requestJSON('PUT', `/admin/categories/${data.get('id')}`, body);
+        const result = await requestJSON('PUT', '/admin/categories/' + data.get('id'), body);
         updateCategoryOutput.textContent = JSON.stringify(result, null, 2);
         fetchCategories();
       } catch (err) {
@@ -379,7 +384,7 @@ func Home() gin.HandlerFunc {
       e.preventDefault();
       const data = new FormData(deleteCategoryForm);
       try {
-        const result = await requestJSON('DELETE', `/admin/categories/${data.get('id')}`);
+        const result = await requestJSON('DELETE', '/admin/categories/' + data.get('id'));
         deleteCategoryOutput.textContent = JSON.stringify(result || { ok: true }, null, 2);
         fetchCategories();
       } catch (err) {
@@ -421,7 +426,7 @@ func Home() gin.HandlerFunc {
       if (imageUrl) body.imageUrl = imageUrl;
       if (isActiveRaw) body.isActive = isActiveRaw === 'true';
       try {
-        const result = await requestJSON('PUT', `/admin/products/${data.get('id')}`, body);
+        const result = await requestJSON('PUT', '/admin/products/' + data.get('id'), body);
         updateProductOutput.textContent = JSON.stringify(result, null, 2);
         fetchProducts();
       } catch (err) {
@@ -433,7 +438,7 @@ func Home() gin.HandlerFunc {
       e.preventDefault();
       const data = new FormData(deleteProductForm);
       try {
-        const result = await requestJSON('DELETE', `/admin/products/${data.get('id')}`);
+        const result = await requestJSON('DELETE', '/admin/products/' + data.get('id'));
         deleteProductOutput.textContent = JSON.stringify(result || { ok: true }, null, 2);
         fetchProducts();
       } catch (err) {
@@ -446,5 +451,5 @@ func Home() gin.HandlerFunc {
   </script>
 </body>
 </html>`)
-        }
+	}
 }
