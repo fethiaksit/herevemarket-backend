@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -35,7 +37,43 @@ type ProductUpdateRequest struct {
 // GetAllProducts returns all products for admin users.
 func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cursor, err := db.Collection("products").Find(context.Background(), bson.M{})
+		page, limit, err := parsePaginationParams(c.Query("page"), c.Query("limit"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		filter := bson.M{}
+
+		if category := strings.TrimSpace(c.Query("category")); category != "" {
+			filter["category"] = category
+		}
+
+		if search := strings.TrimSpace(c.Query("search")); search != "" {
+			filter["name"] = bson.M{"$regex": search, "$options": "i"}
+		}
+
+		if isActive := strings.TrimSpace(c.Query("isActive")); isActive != "" {
+			active, parseErr := strconv.ParseBool(isActive)
+			if parseErr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid isActive parameter"})
+				return
+			}
+			filter["isActive"] = active
+		}
+
+		findOptions := options.Find().
+			SetSkip((page - 1) * limit).
+			SetLimit(limit).
+			SetSort(bson.D{{Key: "createdAt", Value: -1}})
+
+		total, err := db.Collection("products").CountDocuments(context.Background(), filter)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+			return
+		}
+
+		cursor, err := db.Collection("products").Find(context.Background(), filter, findOptions)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
@@ -48,7 +86,14 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, products)
+		c.JSON(http.StatusOK, gin.H{
+			"data": products,
+			"pagination": gin.H{
+				"page":  page,
+				"limit": limit,
+				"total": total,
+			},
+		})
 	}
 }
 
