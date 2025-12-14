@@ -10,8 +10,16 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		MongoURI:  os.Getenv("mongodb://localhost:27017"),
-		DBName:    os.Getenv("docker-herevemarket"),
-		JWTSecret: os.Getenv("MgGYQBvqZodV4sPFJaC6XRbspRiklcs6OmHG714ynxk="),
+		MongoURI:  getEnvOrDefault("MONGO_URI", AppEnv.MongoURI),
+		DBName:    getEnvOrDefault("DB_NAME", AppEnv.DBName),
+		JWTSecret: getEnvOrDefault("JWT_SECRET", AppEnv.JWTSecret),
 	}
+}
+
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+
+	return defaultValue
 }
