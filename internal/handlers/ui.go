@@ -61,30 +61,19 @@ button {
 button.danger {
   background: #dc2626;
 }
-.clickable {
-  cursor: pointer;
-}
-.muted {
-  color: #475569;
-}
-.stacked {
-  display: grid;
-  gap: 10px;
-}
 .card {
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   padding: 8px;
+  cursor: pointer;
 }
 .list {
   display: grid;
   gap: 6px;
 }
-pre {
-  background: #020617;
-  color: #e5e7eb;
-  padding: 10px;
-  border-radius: 6px;
+.muted {
+  color: #475569;
+  font-size: 0.9rem;
 }
 </style>
 </head>
@@ -106,30 +95,31 @@ pre {
   <input name="password" type="password" value="123456">
   <button>Login</button>
 </form>
-<div id="loginStatus"></div>
+<div id="loginStatus" class="muted"></div>
 </section>
 
 <section>
 <h2>Kategoriler</h2>
+
 <form id="addCategory">
   <input name="name" placeholder="Kategori adı">
   <button>Ekle</button>
 </form>
+
 <div id="categoryList" class="list"></div>
-<form id="editCategory" class="stacked" style="display: none; margin-top: 10px;">
-  <div class="muted">Seçilen kategori: <strong id="categorySelection"></strong></div>
-  <label>Ad</label>
+
+<form id="editCategory" style="display:none; margin-top:10px;">
+  <div class="muted">Seçilen kategori: <strong id="catName"></strong></div>
   <input name="name" placeholder="Yeni ad">
   <label><input type="checkbox" name="isActive"> Aktif</label>
-  <div class="list">
-    <button type="submit">Güncelle</button>
-    <button type="button" id="deleteCategory" class="danger">Sil</button>
-  </div>
+  <button>Güncelle</button>
+  <button type="button" id="deleteCategory" class="danger">Pasifleştir</button>
 </form>
 </section>
 
 <section>
 <h2>Ürünler</h2>
+
 <form id="addProduct">
   <input name="name" placeholder="Ürün adı">
   <input name="price" placeholder="Fiyat">
@@ -137,22 +127,18 @@ pre {
   <input name="imageUrl" placeholder="Görsel URL">
   <button>Ekle</button>
 </form>
+
 <div id="productList" class="list"></div>
-<form id="editProduct" class="stacked" style="display: none; margin-top: 10px;">
-  <div class="muted">Seçilen ürün: <strong id="productSelection"></strong></div>
-  <label>Ad</label>
-  <input name="name" placeholder="Ürün adı">
-  <label>Fiyat</label>
+
+<form id="editProduct" style="display:none; margin-top:10px;">
+  <div class="muted">Seçilen ürün: <strong id="prodName"></strong></div>
+  <input name="name" placeholder="Ad">
   <input name="price" placeholder="Fiyat">
-  <label>Kategori</label>
   <input name="category" placeholder="Kategori">
-  <label>Görsel URL</label>
   <input name="imageUrl" placeholder="Görsel URL">
   <label><input type="checkbox" name="isActive"> Aktif</label>
-  <div class="list">
-    <button type="submit">Güncelle</button>
-    <button type="button" id="deleteProduct" class="danger">Sil</button>
-  </div>
+  <button>Güncelle</button>
+  <button type="button" id="deleteProduct" class="danger">Pasifleştir</button>
 </form>
 </section>
 
@@ -163,24 +149,6 @@ let token = "";
 let selectedCategory = null;
 let selectedProduct = null;
 
-document.getElementById("loginForm").onsubmit = async function(e) {
-  e.preventDefault();
-  const f = new FormData(e.target);
-  const res = await fetch("/admin/login", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      email: f.get("email"),
-      password: f.get("password")
-    })
-  });
-  const j = await res.json();
-  token = j.token;
-  document.getElementById("loginStatus").innerText = "Giriş OK";
-  loadCategories();
-  loadProducts();
-};
-
 function authHeaders() {
   return {
     "Content-Type": "application/json",
@@ -188,57 +156,62 @@ function authHeaders() {
   };
 }
 
+/* LOGIN */
+document.getElementById("loginForm").onsubmit = async function(e) {
+  e.preventDefault();
+  const f = new FormData(e.target);
+
+  const res = await fetch("/admin/login", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      email: f.get("email"),
+      password: f.get("password")
+    })
+  });
+
+  const j = await res.json();
+  if (!res.ok) {
+    document.getElementById("loginStatus").innerText = "Hata";
+    return;
+  }
+
+  token = j.token;
+  document.getElementById("loginStatus").innerText = "Giriş başarılı";
+  loadCategories();
+  loadProducts();
+};
+
+/* CATEGORIES */
 async function loadCategories() {
-  const res = await fetch(token ? "/admin/categories" : "/categories", token ? { headers: authHeaders() } : undefined);
-  const data = await res.json();
+  const res = await fetch(token ? "/admin/categories" : "/categories",
+    token ? { headers: authHeaders() } : undefined
+  );
+  const payload = await res.json();
+  const data = payload.data || payload;
+
   const el = document.getElementById("categoryList");
   el.innerHTML = "";
-  data.forEach(function(c) {
-    const card = document.createElement("div");
-    card.className = "card clickable";
-    card.innerHTML = "<div>" + c.name + "</div><div class='muted'>" + (c.isActive ? "Aktif" : "Pasif") + "</div>";
-    card.onclick = function() { selectCategory(c); };
-    el.appendChild(card);
+
+  data.forEach(c => {
+    const d = document.createElement("div");
+    d.className = "card";
+    d.innerHTML = c.name + " (" + (c.isActive ? "Aktif" : "Pasif") + ")";
+    d.onclick = () => selectCategory(c);
+    el.appendChild(d);
   });
 }
 
-async function loadProducts() {
-  const res = await fetch(token ? "/admin/products" : "/products", token ? { headers: authHeaders() } : undefined);
-  const payload = await res.json();
-  const data = payload.data || payload; // supports both array and paginated responses
-  const el = document.getElementById("productList");
-  el.innerHTML = "";
-  data.forEach(function(p) {
-    const card = document.createElement("div");
-    card.className = "card clickable";
-    card.innerHTML = "<div>" + p.name + "</div><div class='muted'>" + p.price + " • " + p.category + " • " + (p.isActive ? "Aktif" : "Pasif") + "</div>";
-    card.onclick = function() { selectProduct(p); };
-    el.appendChild(card);
-  });
+function selectCategory(c) {
+  selectedCategory = c;
+  document.getElementById("editCategory").style.display = "grid";
+  document.getElementById("catName").innerText = c.name;
+  const f = document.getElementById("editCategory");
+  f.elements.name.value = c.name;
+  f.elements.isActive.checked = !!c.isActive;
 }
 
-function selectCategory(category) {
-  selectedCategory = category;
-  document.getElementById("categorySelection").innerText = category.name;
-  const form = document.getElementById("editCategory");
-  form.style.display = "grid";
-  form.elements.name.value = category.name;
-  form.elements.isActive.checked = !!category.isActive;
-}
-
-function selectProduct(product) {
-  selectedProduct = product;
-  document.getElementById("productSelection").innerText = product.name;
-  const form = document.getElementById("editProduct");
-  form.style.display = "grid";
-  form.elements.name.value = product.name;
-  form.elements.price.value = product.price;
-  form.elements.category.value = product.category;
-  form.elements.imageUrl.value = product.imageUrl;
-  form.elements.isActive.checked = !!product.isActive;
-}
-
-document.getElementById("addCategory").onsubmit = async function(e) {
+document.getElementById("addCategory").onsubmit = async e => {
   e.preventDefault();
   const f = new FormData(e.target);
   await fetch("/admin/categories", {
@@ -249,35 +222,61 @@ document.getElementById("addCategory").onsubmit = async function(e) {
   loadCategories();
 };
 
-document.getElementById("editCategory").onsubmit = async function(e) {
+document.getElementById("editCategory").onsubmit = async e => {
   e.preventDefault();
-  if (!selectedCategory) return;
   const f = new FormData(e.target);
-  await fetch(`/admin/categories/${selectedCategory.id}`, {
+  await fetch("/admin/categories/" + selectedCategory._id, {
     method: "PUT",
     headers: authHeaders(),
     body: JSON.stringify({
       name: f.get("name"),
-      isActive: f.get("isActive") === "on",
+      isActive: f.get("isActive") === "on"
     })
   });
-  selectedCategory = null;
-  document.getElementById("editCategory").style.display = "none";
   loadCategories();
 };
 
-document.getElementById("deleteCategory").onclick = async function() {
-  if (!selectedCategory) return;
-  await fetch(`/admin/categories/${selectedCategory.id}`, {
+document.getElementById("deleteCategory").onclick = async () => {
+  await fetch("/admin/categories/" + selectedCategory._id, {
     method: "DELETE",
     headers: authHeaders()
   });
-  selectedCategory = null;
-  document.getElementById("editCategory").style.display = "none";
   loadCategories();
 };
 
-document.getElementById("addProduct").onsubmit = async function(e) {
+/* PRODUCTS */
+async function loadProducts() {
+  const res = await fetch(token ? "/admin/products" : "/products",
+    token ? { headers: authHeaders() } : undefined
+  );
+  const payload = await res.json();
+  const data = payload.data || payload;
+
+  const el = document.getElementById("productList");
+  el.innerHTML = "";
+
+  data.forEach(p => {
+    const d = document.createElement("div");
+    d.className = "card";
+    d.innerHTML = p.name + " - " + p.price + " (" + (p.isActive ? "Aktif" : "Pasif") + ")";
+    d.onclick = () => selectProduct(p);
+    el.appendChild(d);
+  });
+}
+
+function selectProduct(p) {
+  selectedProduct = p;
+  document.getElementById("editProduct").style.display = "grid";
+  document.getElementById("prodName").innerText = p.name;
+  const f = document.getElementById("editProduct");
+  f.elements.name.value = p.name;
+  f.elements.price.value = p.price;
+  f.elements.category.value = p.category;
+  f.elements.imageUrl.value = p.imageUrl;
+  f.elements.isActive.checked = !!p.isActive;
+}
+
+document.getElementById("addProduct").onsubmit = async e => {
   e.preventDefault();
   const f = new FormData(e.target);
   await fetch("/admin/products", {
@@ -294,11 +293,10 @@ document.getElementById("addProduct").onsubmit = async function(e) {
   loadProducts();
 };
 
-document.getElementById("editProduct").onsubmit = async function(e) {
+document.getElementById("editProduct").onsubmit = async e => {
   e.preventDefault();
-  if (!selectedProduct) return;
   const f = new FormData(e.target);
-  await fetch(`/admin/products/${selectedProduct.id}`, {
+  await fetch("/admin/products/" + selectedProduct._id, {
     method: "PUT",
     headers: authHeaders(),
     body: JSON.stringify({
@@ -306,22 +304,17 @@ document.getElementById("editProduct").onsubmit = async function(e) {
       price: parseFloat(f.get("price")),
       category: f.get("category"),
       imageUrl: f.get("imageUrl"),
-      isActive: f.get("isActive") === "on",
+      isActive: f.get("isActive") === "on"
     })
   });
-  selectedProduct = null;
-  document.getElementById("editProduct").style.display = "none";
   loadProducts();
 };
 
-document.getElementById("deleteProduct").onclick = async function() {
-  if (!selectedProduct) return;
-  await fetch(`/admin/products/${selectedProduct.id}`, {
+document.getElementById("deleteProduct").onclick = async () => {
+  await fetch("/admin/products/" + selectedProduct._id, {
     method: "DELETE",
     headers: authHeaders()
   });
-  selectedProduct = null;
-  document.getElementById("editProduct").style.display = "none";
   loadProducts();
 };
 
