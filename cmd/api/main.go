@@ -33,6 +33,7 @@ func main() {
 		admin.GET("/me", func(c *gin.Context) {
 			c.JSON(200, gin.H{"ok": true})
 		})
+		r.GET("/products", handlers.GetProducts(db))
 	}
 
 	r.Run(":8080")
