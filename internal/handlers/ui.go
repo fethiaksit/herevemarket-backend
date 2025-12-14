@@ -160,7 +160,8 @@ async function loadCategories() {
 
 async function loadProducts() {
   const res = await fetch("/products");
-  const data = await res.json();
+  const payload = await res.json();
+  const data = payload.data || payload; // supports both array and paginated responses
   const el = document.getElementById("productList");
   el.innerHTML = "";
   data.forEach(function(p) {
