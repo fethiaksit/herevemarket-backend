@@ -122,7 +122,9 @@ hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
   <form id="addProduct">
     <input name="name" placeholder="Ürün adı">
     <input name="price" placeholder="Fiyat (örn: 24.90)">
-    <input name="category" placeholder="Kategori">
+    <select name="category" id="productCategorySelect">
+      <option value="">Kategori Seç</option>
+    </select>
     <input name="imageUrl" placeholder="Görsel URL">
     <button type="submit">Ekle</button>
   </form>
@@ -137,7 +139,9 @@ hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
     <label>Fiyat</label>
     <input name="price" placeholder="Fiyat">
     <label>Kategori</label>
-    <input name="category" placeholder="Kategori">
+    <select name="category" id="productCategorySelect">
+      <option value="">Kategori Seç</option>
+    </select>
     <label>Görsel URL</label>
     <input name="imageUrl" placeholder="Görsel URL">
     <label><input type="checkbox" name="isActive"> Aktif</label>
@@ -178,6 +182,43 @@ function setText(id, text) {
   if (el) el.innerText = text || "";
 }
 
+async function populateProductCategorySelects(selectedValue, preloadedCategories) {
+  const categoryData = Array.isArray(preloadedCategories) && preloadedCategories.length > 0
+    ? preloadedCategories
+    : null;
+
+  let categories = categoryData;
+
+  if (!categories) {
+    const res = await fetch("/categories");
+    const payload = await safeJson(res);
+    categories = (payload && payload.data) ? payload.data : (payload || []);
+  }
+
+  const activeCategories = (categories || []).filter(function(c) { return c && c.isActive; });
+  const selects = document.querySelectorAll("#productCategorySelect");
+
+  selects.forEach(function(select) {
+    const preserved = selectedValue ?? select.value;
+    select.innerHTML = "";
+
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = "Kategori Seç";
+    select.appendChild(def);
+
+    activeCategories.forEach(function(c) {
+      const opt = document.createElement("option");
+      opt.value = c.name;
+      opt.textContent = c.name;
+      select.appendChild(opt);
+    });
+
+    const exists = activeCategories.some(function(c) { return c.name === preserved; });
+    select.value = exists ? preserved : "";
+  });
+}
+
 /* LOGIN */
 document.getElementById("loginForm").onsubmit = async function(e) {
   e.preventDefault();
@@ -215,6 +256,8 @@ async function loadCategories() {
   const catRes = await fetch("/categories");
   const catPayload = await safeJson(catRes);
   const catData = (catPayload && catPayload.data) ? catPayload.data : (catPayload || []);
+
+  await populateProductCategorySelects(undefined, catData);
 
   if (filterSelect) {
     filterSelect.innerHTML = "";
@@ -317,13 +360,15 @@ function selectCategory(c) {
   f.elements.isActive.checked = !!c.isActive;
 }
 
-function selectProduct(p) {
+async function selectProduct(p) {
   selectedProduct = p;
   const id = getId(p);
 
   document.getElementById("editProduct").style.display = "grid";
   document.getElementById("prodName").innerText = p.name || "-";
   document.getElementById("prodId").innerText = id ? ("(id: " + id + ")") : "(id yok)";
+
+  await populateProductCategorySelects(p.category);
 
   const f = document.getElementById("editProduct");
   f.elements.name.value = p.name || "";
