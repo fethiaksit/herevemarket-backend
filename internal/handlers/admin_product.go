@@ -18,20 +18,39 @@ import (
 
 // ProductCreateRequest represents the payload for creating a product.
 type ProductCreateRequest struct {
-	Name     string  `json:"name" binding:"required"`
-	Price    float64 `json:"price" binding:"required"`
-	Category string  `json:"category" binding:"required"`
-	ImageURL string  `json:"imageUrl" binding:"required"`
-	IsActive *bool   `json:"isActive"`
+	Name     string   `json:"name" binding:"required"`
+	Price    float64  `json:"price" binding:"required"`
+	Category []string `json:"category" binding:"required"`
+	ImageURL string   `json:"imageUrl" binding:"required"`
+	IsActive *bool    `json:"isActive"`
 }
 
 // ProductUpdateRequest represents the payload for updating a product.
 type ProductUpdateRequest struct {
-	Name     *string  `json:"name"`
-	Price    *float64 `json:"price"`
-	Category *string  `json:"category"`
-	ImageURL *string  `json:"imageUrl"`
-	IsActive *bool    `json:"isActive"`
+	Name     *string   `json:"name"`
+	Price    *float64  `json:"price"`
+	Category *[]string `json:"category"`
+	ImageURL *string   `json:"imageUrl"`
+	IsActive *bool     `json:"isActive"`
+}
+
+func normalizeCategories(values []string) []string {
+	cleaned := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+
+	for _, v := range values {
+		name := strings.TrimSpace(v)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		cleaned = append(cleaned, name)
+	}
+
+	return cleaned
 }
 
 // GetAllProducts returns all products for admin users.
@@ -106,6 +125,12 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
+		categories := normalizeCategories(req.Category)
+		if len(categories) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "category required"})
+			return
+		}
+
 		isActive := true
 		if req.IsActive != nil {
 			isActive = *req.IsActive
@@ -114,7 +139,7 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 		product := models.Product{
 			Name:      req.Name,
 			Price:     req.Price,
-			Category:  req.Category,
+			Category:  categories,
 			ImageURL:  req.ImageURL,
 			IsActive:  isActive,
 			CreatedAt: time.Now(),
@@ -155,7 +180,12 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 			update["price"] = *req.Price
 		}
 		if req.Category != nil {
-			update["category"] = *req.Category
+			categories := normalizeCategories(*req.Category)
+			if len(categories) == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "category required"})
+				return
+			}
+			update["category"] = categories
 		}
 		if req.ImageURL != nil {
 			update["imageUrl"] = *req.ImageURL

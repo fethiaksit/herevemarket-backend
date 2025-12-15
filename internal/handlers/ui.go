@@ -122,7 +122,9 @@ hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
   <form id="addProduct">
     <input name="name" placeholder="Ürün adı">
     <input name="price" placeholder="Fiyat (örn: 24.90)">
-    <input name="category" placeholder="Kategori">
+    <select name="category" id="productCategorySelect" multiple>
+      <option value="">Kategori Seç</option>
+    </select>
     <input name="imageUrl" placeholder="Görsel URL">
     <button type="submit">Ekle</button>
   </form>
@@ -137,7 +139,9 @@ hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
     <label>Fiyat</label>
     <input name="price" placeholder="Fiyat">
     <label>Kategori</label>
-    <input name="category" placeholder="Kategori">
+    <select name="category" id="productCategorySelect" multiple>
+      <option value="">Kategori Seç</option>
+    </select>
     <label>Görsel URL</label>
     <input name="imageUrl" placeholder="Görsel URL">
     <label><input type="checkbox" name="isActive"> Aktif</label>
@@ -178,6 +182,71 @@ function setText(id, text) {
   if (el) el.innerText = text || "";
 }
 
+function normalizeCategoryValues(values) {
+  if (Array.isArray(values)) {
+    return values.filter(function(v) { return !!v; });
+  }
+
+  if (typeof values === "string" && values) {
+    return [values];
+  }
+
+  return [];
+}
+
+function getSelectedCategories(select) {
+  if (!select) return [];
+
+  return Array.from(select.selectedOptions || [])
+    .map(function(opt) { return opt.value; })
+    .filter(function(v) { return !!v; });
+}
+
+async function populateProductCategorySelects(selectedValues, preloadedCategories) {
+  const desiredSelection = normalizeCategoryValues(selectedValues);
+  const categoryData = Array.isArray(preloadedCategories) && preloadedCategories.length > 0
+    ? preloadedCategories
+    : null;
+
+  let categories = categoryData;
+
+  if (!categories) {
+    const res = await fetch("/categories");
+    const payload = await safeJson(res);
+    categories = (payload && payload.data) ? payload.data : (payload || []);
+  }
+
+  const activeCategories = (categories || []).filter(function(c) { return c && c.isActive; });
+  const activeNames = new Set(activeCategories.map(function(c) { return c.name; }));
+  const selects = document.querySelectorAll("#productCategorySelect");
+
+  selects.forEach(function(select) {
+    const preserved = desiredSelection.length > 0 ? desiredSelection : getSelectedCategories(select);
+    select.innerHTML = "";
+    select.multiple = true;
+
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = "Kategori Seç";
+    def.disabled = true;
+    if (preserved.length === 0) def.selected = true;
+    select.appendChild(def);
+
+    activeCategories.forEach(function(c) {
+      const opt = document.createElement("option");
+      opt.value = c.name;
+      opt.textContent = c.name;
+      select.appendChild(opt);
+    });
+
+    preserved.forEach(function(val) {
+      if (!activeNames.has(val)) return;
+      const opt = Array.from(select.options).find(function(o) { return o.value === val; });
+      if (opt) opt.selected = true;
+    });
+  });
+}
+
 /* LOGIN */
 document.getElementById("loginForm").onsubmit = async function(e) {
   e.preventDefault();
@@ -215,6 +284,8 @@ async function loadCategories() {
   const catRes = await fetch("/categories");
   const catPayload = await safeJson(catRes);
   const catData = (catPayload && catPayload.data) ? catPayload.data : (catPayload || []);
+
+  await populateProductCategorySelects(undefined, catData);
 
   if (filterSelect) {
     filterSelect.innerHTML = "";
@@ -293,10 +364,13 @@ async function loadProducts() {
   data.forEach(function(p) {
     const card = document.createElement("div");
     card.className = "card clickable";
+    const categoryLabel = Array.isArray(p.category)
+      ? (p.category.length ? p.category.join(", ") : "-")
+      : (p.category || "-");
     card.innerHTML =
       "<div><strong>" + (p.name || "-") + "</strong></div>" +
       "<div class='muted'>" +
-        (p.price ?? "-") + " • " + (p.category || "-") + " • " + (p.isActive ? "Aktif" : "Pasif") +
+        (p.price ?? "-") + " • " + categoryLabel + " • " + (p.isActive ? "Aktif" : "Pasif") +
       "</div>";
     card.onclick = function() { selectProduct(p); };
     el.appendChild(card);
@@ -317,18 +391,21 @@ function selectCategory(c) {
   f.elements.isActive.checked = !!c.isActive;
 }
 
-function selectProduct(p) {
+async function selectProduct(p) {
   selectedProduct = p;
   const id = getId(p);
+
+  const categories = normalizeCategoryValues(p.category);
 
   document.getElementById("editProduct").style.display = "grid";
   document.getElementById("prodName").innerText = p.name || "-";
   document.getElementById("prodId").innerText = id ? ("(id: " + id + ")") : "(id yok)";
 
+  await populateProductCategorySelects(categories);
+
   const f = document.getElementById("editProduct");
   f.elements.name.value = p.name || "";
   f.elements.price.value = (p.price ?? "");
-  f.elements.category.value = p.category || "";
   f.elements.imageUrl.value = p.imageUrl || "";
   f.elements.isActive.checked = !!p.isActive;
 }
@@ -397,13 +474,16 @@ document.getElementById("addProduct").onsubmit = async function(e) {
   const price = parseFloat(f.get("price"));
   if (Number.isNaN(price)) { alert("Fiyat sayı olmalı (örn 24.90)"); return; }
 
+  const categories = getSelectedCategories(e.target.querySelector('select[name="category"]'));
+  if (categories.length === 0) { alert("En az bir kategori seç"); return; }
+
   await fetch("/admin/products", {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify({
       name: f.get("name"),
       price: price,
-      category: f.get("category"),
+      category: categories,
       imageUrl: f.get("imageUrl"),
       isActive: true
     })
@@ -425,13 +505,16 @@ document.getElementById("editProduct").onsubmit = async function(e) {
   const price = parseFloat(f.get("price"));
   if (Number.isNaN(price)) { alert("Fiyat sayı olmalı"); return; }
 
+  const categories = getSelectedCategories(e.target.querySelector('select[name="category"]'));
+  if (categories.length === 0) { alert("En az bir kategori seç"); return; }
+
   await fetch("/admin/products/" + id, {
     method: "PUT",
     headers: authHeaders(),
     body: JSON.stringify({
       name: f.get("name"),
       price: price,
-      category: f.get("category"),
+      category: categories,
       imageUrl: f.get("imageUrl"),
       isActive: f.get("isActive") === "on"
     })
