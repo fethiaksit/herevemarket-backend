@@ -1,38 +1,29 @@
 package handlers
 
 import (
-	"fmt"
 	"strconv"
+
+	"github.com/gin-gonic/gin"
 )
 
-const (
-	defaultPage  int64 = 1
-	defaultLimit int64 = 20
-	maxLimit     int64 = 100
-)
-
-// parsePaginationParams parses common pagination query parameters with sane defaults and limits.
 func parsePaginationParams(pageStr, limitStr string) (int64, int64, error) {
-	page := defaultPage
-	limit := defaultLimit
+	page := int64(1)
+	limit := int64(20)
 
 	if pageStr != "" {
-		parsed, err := strconv.ParseInt(pageStr, 10, 64)
-		if err != nil || parsed < 1 {
-			return 0, 0, fmt.Errorf("invalid page parameter")
+		p, err := strconv.ParseInt(pageStr, 10, 64)
+		if err != nil || p < 1 {
+			return 0, 0, gin.Error{}
 		}
-		page = parsed
+		page = p
 	}
 
 	if limitStr != "" {
-		parsed, err := strconv.ParseInt(limitStr, 10, 64)
-		if err != nil || parsed < 1 {
-			return 0, 0, fmt.Errorf("invalid limit parameter")
+		l, err := strconv.ParseInt(limitStr, 10, 64)
+		if err != nil || l < 1 || l > 100 {
+			return 0, 0, gin.Error{}
 		}
-		if parsed > maxLimit {
-			parsed = maxLimit
-		}
-		limit = parsed
+		limit = l
 	}
 
 	return page, limit, nil

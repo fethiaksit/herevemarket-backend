@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,9 +25,25 @@ type CategoryUpdateRequest struct {
 	IsActive *bool   `json:"isActive"`
 }
 
+/*
+GET /admin/categories
+- Tüm kategoriler
+- Admin paneli için (aktif/pasif dahil)
+*/
 func GetAllCategories(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cursor, err := db.Collection("categories").Find(context.Background(), bson.M{})
+		filter := bson.M{}
+
+		// ?isActive=true/false
+		if v := strings.TrimSpace(c.Query("isActive")); v != "" {
+			filter["isActive"] = v == "true"
+		}
+
+		opts := options.Find().
+			SetSort(bson.D{{Key: "createdAt", Value: -1}})
+
+		cursor, err := db.Collection("categories").
+			Find(context.Background(), filter, opts)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
@@ -39,15 +56,41 @@ func GetAllCategories(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, categories)
+		c.JSON(http.StatusOK, gin.H{
+			"data": categories,
+		})
 	}
 }
 
+/*
+POST /admin/categories
+- Aynı isimli kategori eklenemez
+*/
 func CreateCategory(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req CategoryCreateRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
+			return
+		}
+
+		// duplicate check
+		count, err := db.Collection("categories").CountDocuments(
+			context.Background(),
+			bson.M{"name": name},
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+			return
+		}
+		if count > 0 {
+			c.JSON(http.StatusConflict, gin.H{"error": "category already exists"})
 			return
 		}
 
@@ -57,12 +100,13 @@ func CreateCategory(db *mongo.Database) gin.HandlerFunc {
 		}
 
 		category := models.Category{
-			Name:      req.Name,
+			Name:      name,
 			IsActive:  isActive,
 			CreatedAt: time.Now(),
 		}
 
-		result, err := db.Collection("categories").InsertOne(context.Background(), category)
+		result, err := db.Collection("categories").
+			InsertOne(context.Background(), category)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
@@ -74,6 +118,9 @@ func CreateCategory(db *mongo.Database) gin.HandlerFunc {
 	}
 }
 
+/*
+PUT /admin/categories/:id
+*/
 func UpdateCategory(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := primitive.ObjectIDFromHex(c.Param("id"))
@@ -89,9 +136,16 @@ func UpdateCategory(db *mongo.Database) gin.HandlerFunc {
 		}
 
 		update := bson.M{}
+
 		if req.Name != nil {
-			update["name"] = *req.Name
+			name := strings.TrimSpace(*req.Name)
+			if name == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "name cannot be empty"})
+				return
+			}
+			update["name"] = name
 		}
+
 		if req.IsActive != nil {
 			update["isActive"] = *req.IsActive
 		}
@@ -102,12 +156,15 @@ func UpdateCategory(db *mongo.Database) gin.HandlerFunc {
 		}
 
 		var updated models.Category
-		err = db.Collection("categories").FindOneAndUpdate(
-			context.Background(),
-			bson.M{"_id": id},
-			bson.M{"$set": update},
-			options.FindOneAndUpdate().SetReturnDocument(options.After),
-		).Decode(&updated)
+		err = db.Collection("categories").
+			FindOneAndUpdate(
+				context.Background(),
+				bson.M{"_id": id},
+				bson.M{"$set": update},
+				options.FindOneAndUpdate().SetReturnDocument(options.After),
+			).
+			Decode(&updated)
+
 		if err == mongo.ErrNoDocuments {
 			c.JSON(http.StatusNotFound, gin.H{"error": "category not found"})
 			return
@@ -121,6 +178,10 @@ func UpdateCategory(db *mongo.Database) gin.HandlerFunc {
 	}
 }
 
+/*
+DELETE /admin/categories/:id
+- Soft delete
+*/
 func DeleteCategory(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := primitive.ObjectIDFromHex(c.Param("id"))

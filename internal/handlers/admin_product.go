@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,7 +15,10 @@ import (
 	"backend/internal/models"
 )
 
-// ProductCreateRequest represents the payload for creating a product.
+/* =======================
+   REQUEST MODELLERİ
+======================= */
+
 type ProductCreateRequest struct {
 	Name     string   `json:"name" binding:"required"`
 	Price    float64  `json:"price" binding:"required"`
@@ -25,7 +27,6 @@ type ProductCreateRequest struct {
 	IsActive *bool    `json:"isActive"`
 }
 
-// ProductUpdateRequest represents the payload for updating a product.
 type ProductUpdateRequest struct {
 	Name     *string   `json:"name"`
 	Price    *float64  `json:"price"`
@@ -34,9 +35,13 @@ type ProductUpdateRequest struct {
 	IsActive *bool     `json:"isActive"`
 }
 
+/* =======================
+   HELPERS
+======================= */
+
 func normalizeCategories(values []string) []string {
-	cleaned := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
+	seen := map[string]struct{}{}
+	out := make([]string, 0)
 
 	for _, v := range values {
 		name := strings.TrimSpace(v)
@@ -47,16 +52,21 @@ func normalizeCategories(values []string) []string {
 			continue
 		}
 		seen[name] = struct{}{}
-		cleaned = append(cleaned, name)
+		out = append(out, name)
 	}
-
-	return cleaned
+	return out
 }
 
-// GetAllProducts returns all products for admin users.
+/* =======================
+   GET (ADMIN) – LIST
+======================= */
+
 func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		page, limit, err := parsePaginationParams(c.Query("page"), c.Query("limit"))
+		page, limit, err := parsePaginationParams(
+			c.Query("page"),
+			c.Query("limit"),
+		)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -73,36 +83,50 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 		}
 
 		if isActive := strings.TrimSpace(c.Query("isActive")); isActive != "" {
-			active, parseErr := strconv.ParseBool(isActive)
-			if parseErr != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid isActive parameter"})
-				return
-			}
-			filter["isActive"] = active
+			filter["isActive"] = isActive == "true"
 		}
 
-		findOptions := options.Find().
+		ctx := context.Background()
+
+		total, err := db.Collection("products").CountDocuments(ctx, filter)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+			return
+		}
+
+		opts := options.Find().
 			SetSkip((page - 1) * limit).
 			SetLimit(limit).
 			SetSort(bson.D{{Key: "createdAt", Value: -1}})
 
-		total, err := db.Collection("products").CountDocuments(context.Background(), filter)
+		cursor, err := db.Collection("products").Find(ctx, filter, opts)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
 		}
+		defer cursor.Close(ctx)
 
-		cursor, err := db.Collection("products").Find(context.Background(), filter, findOptions)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
-			return
-		}
-		defer cursor.Close(context.Background())
+		products := make([]models.Product, 0)
 
-		var products []models.Product
-		if err := cursor.All(context.Background(), &products); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "decode error"})
-			return
+		for cursor.Next(ctx) {
+			var p models.Product
+			if err := cursor.Decode(&p); err != nil {
+				// ⛑ eski string category kayıtları için fallback
+				var raw bson.M
+				_ = cursor.Decode(&raw)
+
+				if cat, ok := raw["category"].(string); ok {
+					raw["category"] = []string{cat}
+					bytes, _ := bson.Marshal(raw)
+					_ = bson.Unmarshal(bytes, &p)
+					products = append(products, p)
+					continue
+				}
+
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "decode error"})
+				return
+			}
+			products = append(products, p)
 		}
 
 		c.JSON(http.StatusOK, gin.H{
@@ -116,7 +140,10 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 	}
 }
 
-// CreateProduct handles creation of a new product.
+/* =======================
+   CREATE
+======================= */
+
 func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req ProductCreateRequest
@@ -145,19 +172,21 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 			CreatedAt: time.Now(),
 		}
 
-		result, err := db.Collection("products").InsertOne(context.Background(), product)
+		res, err := db.Collection("products").InsertOne(context.Background(), product)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
 		}
 
-		product.ID = result.InsertedID.(primitive.ObjectID)
-
+		product.ID = res.InsertedID.(primitive.ObjectID)
 		c.JSON(http.StatusCreated, product)
 	}
 }
 
-// UpdateProduct updates fields of an existing product.
+/* =======================
+   UPDATE
+======================= */
+
 func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := primitive.ObjectIDFromHex(c.Param("id"))
@@ -173,6 +202,7 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 		}
 
 		update := bson.M{}
+
 		if req.Name != nil {
 			update["name"] = *req.Name
 		}
@@ -180,12 +210,12 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 			update["price"] = *req.Price
 		}
 		if req.Category != nil {
-			categories := normalizeCategories(*req.Category)
-			if len(categories) == 0 {
+			cats := normalizeCategories(*req.Category)
+			if len(cats) == 0 {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "category required"})
 				return
 			}
-			update["category"] = categories
+			update["category"] = cats
 		}
 		if req.ImageURL != nil {
 			update["imageUrl"] = *req.ImageURL
@@ -206,6 +236,7 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 			bson.M{"$set": update},
 			options.FindOneAndUpdate().SetReturnDocument(options.After),
 		).Decode(&updated)
+
 		if err == mongo.ErrNoDocuments {
 			c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
 			return
@@ -219,7 +250,10 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 	}
 }
 
-// DeleteProduct marks a product as inactive.
+/* =======================
+   DELETE (SOFT)
+======================= */
+
 func DeleteProduct(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := primitive.ObjectIDFromHex(c.Param("id"))
@@ -228,17 +262,18 @@ func DeleteProduct(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
-		result, err := db.Collection("products").UpdateOne(
+		res, err := db.Collection("products").UpdateOne(
 			context.Background(),
 			bson.M{"_id": id},
 			bson.M{"$set": bson.M{"isActive": false}},
 		)
+
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
 		}
 
-		if result.MatchedCount == 0 {
+		if res.MatchedCount == 0 {
 			c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
 			return
 		}
