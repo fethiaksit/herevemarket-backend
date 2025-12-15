@@ -19,6 +19,21 @@ body {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   background: #f1f5f9;
 }
+.thumbnail {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+.product-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: center;
+}
+.product-text { display: grid; gap: 4px; }
 header {
   background: #0b2d66;
   color: white;
@@ -367,10 +382,19 @@ async function loadProducts() {
     const categoryLabel = Array.isArray(p.category)
       ? (p.category.length ? p.category.join(", ") : "-")
       : (p.category || "-");
+    const imageTag = p.imageUrl
+      ? "<img class='thumbnail' src='" + p.imageUrl + "' alt='" + (p.name || "-") + " görseli' onerror=\"this.style.display='none'\">"
+      : "<div class='thumbnail' style='display:grid; place-items:center; color:#94a3b8; font-size:12px;'>YOK</div>";
+
     card.innerHTML =
-      "<div><strong>" + (p.name || "-") + "</strong></div>" +
-      "<div class='muted'>" +
-        (p.price ?? "-") + " • " + categoryLabel + " • " + (p.isActive ? "Aktif" : "Pasif") +
+      "<div class='product-card'>" +
+        imageTag +
+        "<div class='product-text'>" +
+          "<div><strong>" + (p.name || "-") + "</strong></div>" +
+          "<div class='muted'>" +
+            (p.price ?? "-") + " • " + categoryLabel + " • " + (p.isActive ? "Aktif" : "Pasif") +
+          "</div>" +
+        "</div>" +
       "</div>";
     card.onclick = function() { selectProduct(p); };
     el.appendChild(card);
