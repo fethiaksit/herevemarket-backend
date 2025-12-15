@@ -120,40 +120,107 @@ button.danger {
 <section>
 <h2>Ürünler</h2>
 
-<form id="addProduct">
-  <input name="name" placeholder="Ürün adı">
-  <input name="price" placeholder="Fiyat">
-  <input name="category" placeholder="Kategori">
-  <input name="imageUrl" placeholder="Görsel URL">
-  <button>Ekle</button>
-</form>
+  <form id="addProduct">
+    <input name="name" placeholder="Ürün adı">
+    <input name="price" placeholder="Fiyat (örn: 24.90)">
+    <select name="category" id="productCategorySelect" multiple>
+      <option value="">Kategori Seç</option>
+    </select>
+    <input name="imageUrl" placeholder="Görsel URL">
+    <button type="submit">Ekle</button>
+  </form>
 
   <div id="productList" class="list"></div>
 
-<form id="editProduct" style="display:none; margin-top:10px;">
-  <div class="muted">Seçilen ürün: <strong id="prodName"></strong></div>
-  <input name="name" placeholder="Ad">
-  <input name="price" placeholder="Fiyat">
-  <input name="category" placeholder="Kategori">
-  <input name="imageUrl" placeholder="Görsel URL">
-  <label><input type="checkbox" name="isActive"> Aktif</label>
-  <button>Güncelle</button>
-  <button type="button" id="deleteProduct" class="danger">Pasifleştir</button>
-</form>
-</section>
+  <form id="editProduct" class="stacked" style="display:none; margin-top:10px;">
+    <hr>
+    <div class="muted">Seçilen ürün: <strong id="prodName"></strong> <span id="prodId" class="muted"></span></div>
+    <label>Ad</label>
+    <input name="name" placeholder="Ürün adı">
+    <label>Fiyat</label>
+    <input name="price" placeholder="Fiyat">
+    <label>Kategori</label>
+    <select name="category" id="productCategorySelect" multiple>
+      <option value="">Kategori Seç</option>
+    </select>
+    <label>Görsel URL</label>
+    <input name="imageUrl" placeholder="Görsel URL">
+    <label><input type="checkbox" name="isActive"> Aktif</label>
+    <button type="submit">Güncelle</button>
+    <button type="button" id="deleteProduct" class="danger">Pasifleştir</button>
+  </form>
+async function safeJson(res) {
+  try { return await res.json(); } catch { return null; }
+}
 
-</main>
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.innerText = text || "";
+}
 
-<script>
-let token = "";
-let selectedCategory = null;
-let selectedProduct = null;
+function normalizeCategoryValues(values) {
+  if (Array.isArray(values)) {
+    return values.filter(function(v) { return !!v; });
+  }
 
-function authHeaders() {
-  return {
-    "Content-Type": "application/json",
-    "Authorization": "Bearer " + token
-  };
+  if (typeof values === "string" && values) {
+    return [values];
+  }
+
+  return [];
+}
+
+function getSelectedCategories(select) {
+  if (!select) return [];
+
+  return Array.from(select.selectedOptions || [])
+    .map(function(opt) { return opt.value; })
+    .filter(function(v) { return !!v; });
+}
+
+async function populateProductCategorySelects(selectedValues, preloadedCategories) {
+  const desiredSelection = normalizeCategoryValues(selectedValues);
+  const categoryData = Array.isArray(preloadedCategories) && preloadedCategories.length > 0
+    ? preloadedCategories
+    : null;
+
+  let categories = categoryData;
+
+  if (!categories) {
+    const res = await fetch("/categories");
+    const payload = await safeJson(res);
+    categories = (payload && payload.data) ? payload.data : (payload || []);
+  }
+
+  const activeCategories = (categories || []).filter(function(c) { return c && c.isActive; });
+  const activeNames = new Set(activeCategories.map(function(c) { return c.name; }));
+  const selects = document.querySelectorAll("#productCategorySelect");
+
+  selects.forEach(function(select) {
+    const preserved = desiredSelection.length > 0 ? desiredSelection : getSelectedCategories(select);
+    select.innerHTML = "";
+    select.multiple = true;
+
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = "Kategori Seç";
+    def.disabled = true;
+    if (preserved.length === 0) def.selected = true;
+    select.appendChild(def);
+
+    activeCategories.forEach(function(c) {
+      const opt = document.createElement("option");
+      opt.value = c.name;
+      opt.textContent = c.name;
+      select.appendChild(opt);
+    });
+
+    preserved.forEach(function(val) {
+      if (!activeNames.has(val)) return;
+      const opt = Array.from(select.options).find(function(o) { return o.value === val; });
+      if (opt) opt.selected = true;
+    });
+  });
 }
 
 /* LOGIN */
@@ -184,11 +251,46 @@ document.getElementById("loginForm").onsubmit = async function(e) {
 
 /* LIST LOADERS */
 async function loadCategories() {
-  const res = await fetch(token ? "/admin/categories" : "/categories",
-    token ? { headers: authHeaders() } : undefined
-  );
-  const payload = await res.json();
-  const data = payload.data || payload;
+  // 1) dropdown için public categories
+  const filterSelect = document.getElementById("categoryFilter");
+  const preserved = filterSelect ? filterSelect.value : "";
+
+  const catRes = await fetch("/categories");
+  const catPayload = await safeJson(catRes);
+  const catData = (catPayload && catPayload.data) ? catPayload.data : (catPayload || []);
+
+  await populateProductCategorySelects(undefined, catData);
+
+  if (filterSelect) {
+    filterSelect.innerHTML = "";
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = "Tüm Kategoriler";
+    filterSelect.appendChild(def);
+
+    (catData || []).forEach(function(c) {
+      const opt = document.createElement("option");
+      opt.value = c.name;
+      opt.textContent = c.name;
+      filterSelect.appendChild(opt);
+    });
+
+    // önceki seçimi koru
+    const exists = (catData || []).some(function(c){ return c.name === preserved; });
+    filterSelect.value = exists ? preserved : "";
+  }
+
+  // 2) liste: admin varsa admin categories (aktif/pasif), yoksa public
+  let listUrl = "/categories";
+  let listInit = undefined;
+  if (hasToken()) {
+    listUrl = "/admin/categories";
+    listInit = { headers: authHeaders() };
+  }
+
+  const res = await fetch(listUrl, listInit);
+  const payload = await safeJson(res);
+  const data = (payload && payload.data) ? payload.data : (payload || []);
 
   const el = document.getElementById("categoryList");
   el.innerHTML = "";
@@ -208,6 +310,48 @@ async function loadCategories() {
   });
 }
 
+document.getElementById("categoryFilter").onchange = function() {
+  loadProducts();
+};
+
+/* PRODUCTS */
+async function loadProducts() {
+  const selected = document.getElementById("categoryFilter").value;
+  let url = hasToken() ? "/admin/products" : "/products";
+
+  if (selected) {
+    url += "?" + new URLSearchParams({ category: selected }).toString();
+  }
+
+  const res = await fetch(url, hasToken() ? { headers: authHeaders() } : undefined);
+  const payload = await safeJson(res);
+  const data = (payload && payload.data) ? payload.data : (payload || []);
+
+  const el = document.getElementById("productList");
+  el.innerHTML = "";
+
+  if (!Array.isArray(data) || data.length === 0) {
+    el.innerHTML = "<div class='muted'>Ürün yok</div>";
+    return;
+  }
+
+  data.forEach(function(p) {
+    const card = document.createElement("div");
+    card.className = "card clickable";
+    const categoryLabel = Array.isArray(p.category)
+      ? (p.category.length ? p.category.join(", ") : "-")
+      : (p.category || "-");
+    card.innerHTML =
+      "<div><strong>" + (p.name || "-") + "</strong></div>" +
+      "<div class='muted'>" +
+        (p.price ?? "-") + " • " + categoryLabel + " • " + (p.isActive ? "Aktif" : "Pasif") +
+      "</div>";
+    card.onclick = function() { selectProduct(p); };
+    el.appendChild(card);
+  });
+}
+
+/* SELECT */
 function selectCategory(c) {
   selectedCategory = c;
   document.getElementById("editCategory").style.display = "grid";
@@ -217,7 +361,27 @@ function selectCategory(c) {
   f.elements.isActive.checked = !!c.isActive;
 }
 
-document.getElementById("addCategory").onsubmit = async e => {
+async function selectProduct(p) {
+  selectedProduct = p;
+  const id = getId(p);
+
+  const categories = normalizeCategoryValues(p.category);
+
+  document.getElementById("editProduct").style.display = "grid";
+  document.getElementById("prodName").innerText = p.name || "-";
+  document.getElementById("prodId").innerText = id ? ("(id: " + id + ")") : "(id yok)";
+
+  await populateProductCategorySelects(categories);
+
+  const f = document.getElementById("editProduct");
+  f.elements.name.value = p.name || "";
+  f.elements.price.value = (p.price ?? "");
+  f.elements.imageUrl.value = p.imageUrl || "";
+  f.elements.isActive.checked = !!p.isActive;
+}
+
+/* CATEGORY CRUD (admin required) */
+document.getElementById("addCategory").onsubmit = async function(e) {
   e.preventDefault();
   const f = new FormData(e.target);
   await fetch("/admin/categories", {
@@ -282,16 +446,16 @@ function selectProduct(p) {
   f.elements.isActive.checked = !!p.isActive;
 }
 
-document.getElementById("addProduct").onsubmit = async e => {
-  e.preventDefault();
-  const f = new FormData(e.target);
+  const categories = getSelectedCategories(e.target.querySelector('select[name="category"]'));
+  if (categories.length === 0) { alert("En az bir kategori seç"); return; }
+
   await fetch("/admin/products", {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify({
       name: f.get("name"),
-      price: parseFloat(f.get("price")),
-      category: f.get("category"),
+      price: price,
+      category: categories,
       imageUrl: f.get("imageUrl"),
       isActive: true
     })
@@ -302,13 +466,19 @@ document.getElementById("addProduct").onsubmit = async e => {
 document.getElementById("editProduct").onsubmit = async function(e) {
   e.preventDefault();
   const f = new FormData(e.target);
-  await fetch("/admin/products/" + selectedProduct._id, {
+  const price = parseFloat(f.get("price"));
+  if (Number.isNaN(price)) { alert("Fiyat sayı olmalı"); return; }
+
+  const categories = getSelectedCategories(e.target.querySelector('select[name="category"]'));
+  if (categories.length === 0) { alert("En az bir kategori seç"); return; }
+
+  await fetch("/admin/products/" + id, {
     method: "PUT",
     headers: authHeaders(),
     body: JSON.stringify({
       name: f.get("name"),
-      price: parseFloat(f.get("price")),
-      category: f.get("category"),
+      price: price,
+      category: categories,
       imageUrl: f.get("imageUrl"),
       isActive: f.get("isActive") === "on"
     })
