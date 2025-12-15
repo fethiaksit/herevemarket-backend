@@ -139,7 +139,7 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 		product := models.Product{
 			Name:      req.Name,
 			Price:     req.Price,
-			Category:  categories,
+			Category:  models.StringList(categories),
 			ImageURL:  req.ImageURL,
 			IsActive:  isActive,
 			CreatedAt: time.Now(),
@@ -185,7 +185,7 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "category required"})
 				return
 			}
-			update["category"] = categories
+			update["category"] = models.StringList(categories)
 		}
 		if req.ImageURL != nil {
 			update["imageUrl"] = *req.ImageURL
