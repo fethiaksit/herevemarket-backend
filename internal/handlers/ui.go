@@ -61,6 +61,16 @@ button {
 button.danger {
   background: #dc2626;
 }
+.clickable {
+  cursor: pointer;
+}
+.muted {
+  color: #475569;
+}
+.stacked {
+  display: grid;
+  gap: 10px;
+}
 .card {
   border: 1px solid #e2e8f0;
   border-radius: 6px;
@@ -106,10 +116,24 @@ pre {
   <button>Ekle</button>
 </form>
 <div id="categoryList" class="list"></div>
+<form id="editCategory" class="stacked" style="display: none; margin-top: 10px;">
+  <div class="muted">Seçilen kategori: <strong id="categorySelection"></strong></div>
+  <label>Ad</label>
+  <input name="name" placeholder="Yeni ad">
+  <label><input type="checkbox" name="isActive"> Aktif</label>
+  <div class="list">
+    <button type="submit">Güncelle</button>
+    <button type="button" id="deleteCategory" class="danger">Sil</button>
+  </div>
+</form>
 </section>
 
 <section>
 <h2>Ürünler</h2>
+<label>Kategori Filtresi</label>
+<select id="categoryFilter">
+  <option value="">Tüm Kategoriler</option>
+</select>
 <form id="addProduct">
   <input name="name" placeholder="Ürün adı">
   <input name="price" placeholder="Fiyat">
@@ -118,12 +142,30 @@ pre {
   <button>Ekle</button>
 </form>
 <div id="productList" class="list"></div>
+<form id="editProduct" class="stacked" style="display: none; margin-top: 10px;">
+  <div class="muted">Seçilen ürün: <strong id="productSelection"></strong></div>
+  <label>Ad</label>
+  <input name="name" placeholder="Ürün adı">
+  <label>Fiyat</label>
+  <input name="price" placeholder="Fiyat">
+  <label>Kategori</label>
+  <input name="category" placeholder="Kategori">
+  <label>Görsel URL</label>
+  <input name="imageUrl" placeholder="Görsel URL">
+  <label><input type="checkbox" name="isActive"> Aktif</label>
+  <div class="list">
+    <button type="submit">Güncelle</button>
+    <button type="button" id="deleteProduct" class="danger">Sil</button>
+  </div>
+</form>
 </section>
 
 </main>
 
 <script>
 let token = "";
+let selectedCategory = null;
+let selectedProduct = null;
 
 document.getElementById("loginForm").onsubmit = async function(e) {
   e.preventDefault();
@@ -139,6 +181,8 @@ document.getElementById("loginForm").onsubmit = async function(e) {
   const j = await res.json();
   token = j.token;
   document.getElementById("loginStatus").innerText = "Giriş OK";
+  loadCategories();
+  loadProducts();
 };
 
 function authHeaders() {
@@ -149,23 +193,92 @@ function authHeaders() {
 }
 
 async function loadCategories() {
-  const res = await fetch("/categories");
-  const data = await res.json();
+  const filterSelect = document.getElementById("categoryFilter");
+  const preservedFilter = filterSelect.value;
+
+  const categoryResponse = await fetch("/categories");
+  const filterCategories = await categoryResponse.json();
+
+  filterSelect.innerHTML = "";
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "Tüm Kategoriler";
+  filterSelect.appendChild(defaultOption);
+
+  filterCategories.forEach(function(c) {
+    const option = document.createElement("option");
+    option.value = c.name;
+    option.textContent = c.name;
+    filterSelect.appendChild(option);
+  });
+
+  if (preservedFilter && filterCategories.some(function(c) { return c.name === preservedFilter; })) {
+    filterSelect.value = preservedFilter;
+  } else {
+    filterSelect.value = "";
+  }
+
+  let listCategories = filterCategories;
+  if (token) {
+    const res = await fetch("/admin/categories", { headers: authHeaders() });
+    listCategories = await res.json();
+  }
+
   const el = document.getElementById("categoryList");
   el.innerHTML = "";
-  data.forEach(function(c) {
-    el.innerHTML += "<div class='card'>" + c.name + "</div>";
+  listCategories.forEach(function(c) {
+    const card = document.createElement("div");
+    card.className = "card clickable";
+    card.innerHTML = "<div>" + c.name + "</div><div class='muted'>" + (c.isActive ? "Aktif" : "Pasif") + "</div>";
+    card.onclick = function() { selectCategory(c); };
+    el.appendChild(card);
   });
 }
 
 async function loadProducts() {
-  const res = await fetch("/products");
-  const data = await res.json();
+  const category = document.getElementById("categoryFilter").value;
+  let url = token ? "/admin/products" : "/products";
+  if (category) {
+    url += "?" + new URLSearchParams({ category }).toString();
+  }
+
+  const res = await fetch(url, token ? { headers: authHeaders() } : undefined);
+  const payload = await res.json();
+  const data = payload.data || payload; // supports both array and paginated responses
   const el = document.getElementById("productList");
   el.innerHTML = "";
   data.forEach(function(p) {
-    el.innerHTML += "<div class='card'>" + p.name + " - " + p.price + "</div>";
+    const card = document.createElement("div");
+    card.className = "card clickable";
+    card.innerHTML = "<div>" + p.name + "</div><div class='muted'>" + p.price + " • " + p.category + " • " + (p.isActive ? "Aktif" : "Pasif") + "</div>";
+    card.onclick = function() { selectProduct(p); };
+    el.appendChild(card);
   });
+}
+
+document.getElementById("categoryFilter").onchange = function(e) {
+  loadProducts();
+};
+
+function selectCategory(category) {
+  selectedCategory = category;
+  document.getElementById("categorySelection").innerText = category.name;
+  const form = document.getElementById("editCategory");
+  form.style.display = "grid";
+  form.elements.name.value = category.name;
+  form.elements.isActive.checked = !!category.isActive;
+}
+
+function selectProduct(product) {
+  selectedProduct = product;
+  document.getElementById("productSelection").innerText = product.name;
+  const form = document.getElementById("editProduct");
+  form.style.display = "grid";
+  form.elements.name.value = product.name;
+  form.elements.price.value = product.price;
+  form.elements.category.value = product.category;
+  form.elements.imageUrl.value = product.imageUrl;
+  form.elements.isActive.checked = !!product.isActive;
 }
 
 document.getElementById("addCategory").onsubmit = async function(e) {
@@ -176,6 +289,34 @@ document.getElementById("addCategory").onsubmit = async function(e) {
     headers: authHeaders(),
     body: JSON.stringify({ name: f.get("name"), isActive: true })
   });
+  loadCategories();
+};
+
+document.getElementById("editCategory").onsubmit = async function(e) {
+  e.preventDefault();
+  if (!selectedCategory) return;
+  const f = new FormData(e.target);
+  await fetch("/admin/categories/" + selectedCategory.id, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      name: f.get("name"),
+      isActive: f.get("isActive") === "on",
+    })
+  });
+  selectedCategory = null;
+  document.getElementById("editCategory").style.display = "none";
+  loadCategories();
+};
+
+document.getElementById("deleteCategory").onclick = async function() {
+  if (!selectedCategory) return;
+  await fetch("/admin/categories/" + selectedCategory.id, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
+  selectedCategory = null;
+  document.getElementById("editCategory").style.display = "none";
   loadCategories();
 };
 
@@ -193,6 +334,37 @@ document.getElementById("addProduct").onsubmit = async function(e) {
       isActive: true
     })
   });
+  loadProducts();
+};
+
+document.getElementById("editProduct").onsubmit = async function(e) {
+  e.preventDefault();
+  if (!selectedProduct) return;
+  const f = new FormData(e.target);
+  await fetch("/admin/products/" + selectedProduct.id, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      name: f.get("name"),
+      price: parseFloat(f.get("price")),
+      category: f.get("category"),
+      imageUrl: f.get("imageUrl"),
+      isActive: f.get("isActive") === "on",
+    })
+  });
+  selectedProduct = null;
+  document.getElementById("editProduct").style.display = "none";
+  loadProducts();
+};
+
+document.getElementById("deleteProduct").onclick = async function() {
+  if (!selectedProduct) return;
+  await fetch("/admin/products/" + selectedProduct.id, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
+  selectedProduct = null;
+  document.getElementById("editProduct").style.display = "none";
   loadProducts();
 };
 
