@@ -64,8 +64,8 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 
 		filter := bson.M{}
 
-		if category := strings.TrimSpace(c.Query("category")); category != "" {
-			filter["category"] = category
+		if categories := parseCategoryFilters(c); len(categories) > 0 {
+			filter["category"] = bson.M{"$in": categories}
 		}
 
 		if search := strings.TrimSpace(c.Query("search")); search != "" {
