@@ -57,17 +57,67 @@ button {
   cursor: pointer;
 }
 button.danger { background: #dc2626; }
+button.ghost { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; }
+button.ghost.danger { color: #b91c1c; border-color: #fecaca; }
 .clickable { cursor: pointer; }
 .card {
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   padding: 8px;
   cursor: pointer;
+  display: grid;
+  gap: 6px;
 }
 .list { display: grid; gap: 6px; }
 .muted { color: #475569; font-size: 0.9rem; }
 .stacked { display: grid; gap: 10px; }
 hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
+.inline { display: flex; gap: 8px; align-items: center; }
+.toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0; flex-wrap: wrap; }
+.badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+  background: #e2e8f0;
+}
+.badge.success { background: #dcfce7; color: #166534; }
+.badge.inactive { background: #fee2e2; color: #b91c1c; }
+.badge.info { background: #e0f2fe; color: #075985; }
+.badge.deleted { background: #f8fafc; color: #0f172a; border: 1px dashed #cbd5e1; }
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.modal {
+  background: white;
+  border-radius: 10px;
+  padding: 20px;
+  width: 320px;
+  box-shadow: 0 15px 40px rgba(0,0,0,0.16);
+}
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #0f172a;
+  color: white;
+  padding: 12px 16px;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  z-index: 60;
+  min-width: 220px;
+}
+.toast.error { background: #b91c1c; }
+.product-actions { display: flex; gap: 8px; align-items: center; }
 </style>
 </head>
 
@@ -114,10 +164,18 @@ hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
 <section>
   <h2>Ürünler</h2>
 
-  <label>Kategori Filtresi</label>
-  <select id="categoryFilter">
-    <option value="">Tüm Kategoriler</option>
-  </select>
+  <div class="toolbar">
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <label style="margin:0;">Kategori Filtresi</label>
+      <select id="categoryFilter">
+        <option value="">Tüm Kategoriler</option>
+      </select>
+      <label class="inline" style="margin-left:6px;"><input type="checkbox" id="includeDeleted"> Silinenleri göster</label>
+    </div>
+    <div class="inline">
+      <button type="button" id="bulkDelete" class="danger ghost" disabled>Seçili ürünleri sil</button>
+    </div>
+  </div>
 
   <form id="addProduct">
     <input name="name" placeholder="Ürün adı">
@@ -133,7 +191,7 @@ hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
 
   <form id="editProduct" class="stacked" style="display:none; margin-top:10px;">
     <hr>
-    <div class="muted">Seçilen ürün: <strong id="prodName"></strong> <span id="prodId" class="muted"></span></div>
+    <div class="muted" id="selectedProductInfo">Seçilen ürün: <strong id="prodName"></strong> <span id="prodId" class="muted"></span></div>
     <label>Ad</label>
     <input name="name" placeholder="Ürün adı">
     <label>Fiyat</label>
@@ -146,20 +204,41 @@ hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
     <input name="imageUrl" placeholder="Görsel URL">
     <label><input type="checkbox" name="isActive"> Aktif</label>
     <button type="submit">Güncelle</button>
-    <button type="button" id="deleteProduct" class="danger">Pasifleştir</button>
+    <button type="button" id="deleteProduct" class="danger">Sil</button>
   </form>
 </section>
 
 </main>
 
+<div id="toastContainer"></div>
+<div id="confirmModal" class="modal-backdrop" style="display:none;">
+  <div class="modal">
+    <div id="confirmMessage" style="font-size:15px; line-height:1.5;"></div>
+    <div class="modal-actions">
+      <button type="button" id="confirmCancel" class="ghost">Vazgeç</button>
+      <button type="button" id="confirmOk" class="danger">Evet, sil</button>
+    </div>
+  </div>
+</div>
+
 <script>
-let token = "";
+let token = localStorage.getItem("adminToken") || "";
 let selectedCategory = null;
 let selectedProduct = null;
+const selectedProductIds = new Set();
 
 /* id helper: mongo bazen _id, bazen id döner */
 function getId(obj) {
   return (obj && (obj._id || obj.id)) ? (obj._id || obj.id) : null;
+}
+
+function setToken(value) {
+  token = (value || "").trim();
+  if (hasToken()) {
+    localStorage.setItem("adminToken", token);
+  } else {
+    localStorage.removeItem("adminToken");
+  }
 }
 
 function hasToken() {
@@ -180,6 +259,62 @@ async function safeJson(res) {
 function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.innerText = text || "";
+}
+
+function showToast(message, isError) {
+  const container = document.getElementById("toastContainer");
+  if (!container) return;
+
+  const toast = document.createElement("div");
+  toast.className = "toast" + (isError ? " error" : "");
+  toast.textContent = message || "";
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transition = "opacity 0.4s ease";
+  }, 2200);
+
+  setTimeout(() => {
+    toast.remove();
+  }, 2700);
+}
+
+function showConfirm(message) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("confirmModal");
+    const messageEl = document.getElementById("confirmMessage");
+    const okBtn = document.getElementById("confirmOk");
+    const cancelBtn = document.getElementById("confirmCancel");
+
+    if (!modal || !messageEl || !okBtn || !cancelBtn) {
+      resolve(window.confirm(message));
+      return;
+    }
+
+    messageEl.textContent = message;
+    modal.style.display = "flex";
+
+    const cleanup = () => {
+      modal.style.display = "none";
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+    };
+
+    okBtn.onclick = () => { cleanup(); resolve(true); };
+    cancelBtn.onclick = () => { cleanup(); resolve(false); };
+  });
+}
+
+function syncBulkDeleteButton() {
+  const btn = document.getElementById("bulkDelete");
+  if (!btn) return;
+
+  const count = selectedProductIds.size;
+  btn.disabled = !hasToken() || count === 0;
+  btn.textContent = count > 0
+    ? `Seçili ürünleri sil (${count})`
+    : "Seçili ürünleri sil";
 }
 
 function normalizeCategoryValues(values) {
@@ -269,7 +404,7 @@ document.getElementById("loginForm").onsubmit = async function(e) {
     return;
   }
 
-  token = j.token;
+  setToken(j.token);
   setText("loginStatus", "Giriş başarılı ✅");
   await loadCategories();
   await loadProducts();
@@ -281,7 +416,7 @@ async function loadCategories() {
   const filterSelect = document.getElementById("categoryFilter");
   const preserved = filterSelect ? filterSelect.value : "";
 
-  const catRes = await fetch("/categories");
+  const catRes = await fetch(hasToken() ? "/admin/categories" : "/categories", hasToken() ? { headers: authHeaders() } : undefined);
   const catPayload = await safeJson(catRes);
   const catData = (catPayload && catPayload.data) ? catPayload.data : (catPayload || []);
 
@@ -306,27 +441,15 @@ async function loadCategories() {
     filterSelect.value = exists ? preserved : "";
   }
 
-  // 2) liste: admin varsa admin categories (aktif/pasif), yoksa public
-  let listUrl = "/categories";
-  let listInit = undefined;
-  if (hasToken()) {
-    listUrl = "/admin/categories";
-    listInit = { headers: authHeaders() };
-  }
-
-  const res = await fetch(listUrl, listInit);
-  const payload = await safeJson(res);
-  const data = (payload && payload.data) ? payload.data : (payload || []);
-
   const el = document.getElementById("categoryList");
   el.innerHTML = "";
 
-  if (!Array.isArray(data) || data.length === 0) {
+  if (!Array.isArray(catData) || catData.length === 0) {
     el.innerHTML = "<div class='muted'>Kategori yok</div>";
     return;
   }
 
-  data.forEach(function(c) {
+  catData.forEach(function(c) {
     const card = document.createElement("div");
     card.className = "card clickable";
     card.innerHTML = "<div><strong>" + (c.name || "-") + "</strong></div>" +
@@ -340,24 +463,50 @@ document.getElementById("categoryFilter").onchange = function() {
   loadProducts();
 };
 
+document.getElementById("includeDeleted").onchange = function() {
+  loadProducts();
+};
+
 /* PRODUCTS */
 async function loadProducts() {
+  const includeDeletedCheckbox = document.getElementById("includeDeleted");
+  if (includeDeletedCheckbox) {
+    includeDeletedCheckbox.disabled = !hasToken();
+  }
+
   const selected = document.getElementById("categoryFilter").value;
+  const includeDeleted = includeDeletedCheckbox && includeDeletedCheckbox.checked;
   let url = hasToken() ? "/admin/products" : "/products";
 
-  if (selected) {
-    url += "?" + new URLSearchParams({ category: selected }).toString();
-  }
+  const params = new URLSearchParams();
+  if (selected) params.set("category", selected);
+  if (includeDeleted && hasToken()) params.set("includeDeleted", "true");
+
+  const query = params.toString();
+  if (query) url += "?" + query;
 
   const res = await fetch(url, hasToken() ? { headers: authHeaders() } : undefined);
   const payload = await safeJson(res);
   const data = (payload && payload.data) ? payload.data : (payload || []);
+
+  const availableIds = new Set();
+  if (Array.isArray(data)) {
+    data.forEach(function(p) {
+      const id = getId(p);
+      if (id) availableIds.add(id);
+    });
+  }
+
+  Array.from(selectedProductIds).forEach(function(id) {
+    if (!availableIds.has(id)) selectedProductIds.delete(id);
+  });
 
   const el = document.getElementById("productList");
   el.innerHTML = "";
 
   if (!Array.isArray(data) || data.length === 0) {
     el.innerHTML = "<div class='muted'>Ürün yok</div>";
+    syncBulkDeleteButton();
     return;
   }
 
@@ -367,14 +516,82 @@ async function loadProducts() {
     const categoryLabel = Array.isArray(p.category)
       ? (p.category.length ? p.category.join(", ") : "-")
       : (p.category || "-");
-    card.innerHTML =
-      "<div><strong>" + (p.name || "-") + "</strong></div>" +
-      "<div class='muted'>" +
-        (p.price ?? "-") + " • " + categoryLabel + " • " + (p.isActive ? "Aktif" : "Pasif") +
-      "</div>";
+
+    const id = getId(p);
+
+    const title = document.createElement("div");
+    title.style.display = "flex";
+    title.style.justifyContent = "space-between";
+    title.style.alignItems = "center";
+    const nameEl = document.createElement("strong");
+    nameEl.textContent = p.name || "-";
+    title.appendChild(nameEl);
+
+    if (hasToken()) {
+      const actions = document.createElement("div");
+      actions.className = "product-actions";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = selectedProductIds.has(id);
+      checkbox.onclick = function(e) {
+        e.stopPropagation();
+        if (!id) return;
+        if (checkbox.checked) selectedProductIds.add(id); else selectedProductIds.delete(id);
+        syncBulkDeleteButton();
+      };
+      actions.appendChild(checkbox);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "ghost danger";
+      deleteBtn.textContent = "Sil";
+      deleteBtn.onclick = function(e) {
+        e.stopPropagation();
+        if (id) handleDeleteProduct(id);
+      };
+      actions.appendChild(deleteBtn);
+
+      title.appendChild(actions);
+    }
+
+    card.appendChild(title);
+
+    const sub = document.createElement("div");
+    sub.className = "muted";
+    sub.textContent = (p.price ?? "-") + " • " + categoryLabel;
+    card.appendChild(sub);
+
+    const badgeRow = document.createElement("div");
+    badgeRow.className = "inline";
+
+    const status = document.createElement("span");
+    if (p.isDeleted) {
+      status.className = "badge deleted";
+      status.textContent = "Silinmiş";
+    } else if (p.isActive) {
+      status.className = "badge success";
+      status.textContent = "Aktif";
+    } else {
+      status.className = "badge inactive";
+      status.textContent = "Pasif";
+    }
+    badgeRow.appendChild(status);
+
+    if (p.isCampaign) {
+      const badge = document.createElement("span");
+      badge.className = "badge info";
+      badge.textContent = "Kampanyalı";
+      badgeRow.appendChild(badge);
+    }
+
+    card.appendChild(badgeRow);
+
     card.onclick = function() { selectProduct(p); };
     el.appendChild(card);
   });
+
+  syncBulkDeleteButton();
 }
 
 /* SELECT */
@@ -407,7 +624,72 @@ async function selectProduct(p) {
   f.elements.name.value = p.name || "";
   f.elements.price.value = (p.price ?? "");
   f.elements.imageUrl.value = p.imageUrl || "";
-  f.elements.isActive.checked = !!p.isActive;
+  f.elements.isActive.checked = !!p.isActive && !p.isDeleted;
+  f.elements.isActive.disabled = !!p.isDeleted;
+
+  const info = document.getElementById("selectedProductInfo");
+  if (info) {
+    let text = "Seçilen ürün: " + (p.name || "-");
+    if (id) text += " (id: " + id + ")";
+    if (p.isDeleted) text += " • Silinmiş";
+    info.innerText = text;
+  }
+}
+
+async function handleDeleteProduct(id) {
+  if (!hasToken()) { alert("Önce admin login ol"); return; }
+
+  const confirmed = await showConfirm("Bu ürünü silmek istediğine emin misin? Bu işlem geri alınamaz.");
+  if (!confirmed) return;
+
+  const res = await fetch("/admin/products/" + id, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
+  const payload = await safeJson(res);
+
+  if (!res.ok) {
+    const errMsg = (payload && payload.error) ? payload.error : "Silme başarısız";
+    showToast(errMsg, true);
+    return;
+  }
+
+  if (selectedProduct && getId(selectedProduct) === id) {
+    selectedProduct = null;
+    document.getElementById("editProduct").style.display = "none";
+  }
+  selectedProductIds.delete(id);
+  await loadProducts();
+  showToast((payload && payload.message) ? payload.message : "Ürün silindi");
+}
+
+async function handleBulkDelete() {
+  if (!hasToken()) { alert("Önce admin login ol"); return; }
+  const ids = Array.from(selectedProductIds);
+  if (ids.length === 0) return;
+
+  const confirmed = await showConfirm("Seçili ürünleri silmek istediğine emin misin? Bu işlem geri alınamaz.");
+  if (!confirmed) return;
+
+  const res = await fetch("/admin/products/bulk-delete", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ ids: ids })
+  });
+  const payload = await safeJson(res);
+
+  if (!res.ok) {
+    const errMsg = (payload && payload.error) ? payload.error : "Silme başarısız";
+    showToast(errMsg, true);
+    return;
+  }
+
+  selectedProductIds.clear();
+  selectedProduct = null;
+  document.getElementById("editProduct").style.display = "none";
+  await loadProducts();
+  syncBulkDeleteButton();
+  showToast((payload && payload.message) ? payload.message : "Ürünler silindi");
 }
 
 /* CATEGORY CRUD (admin required) */
@@ -530,14 +812,11 @@ document.getElementById("deleteProduct").onclick = async function() {
   const id = getId(selectedProduct);
   if (!id) { alert("Ürün id yok"); return; }
 
-  await fetch("/admin/products/" + id, {
-    method: "DELETE",
-    headers: authHeaders()
-  });
+  await handleDeleteProduct(id);
+};
 
-  selectedProduct = null;
-  document.getElementById("editProduct").style.display = "none";
-  loadProducts();
+document.getElementById("bulkDelete").onclick = function() {
+  handleBulkDelete();
 };
 
 /* initial load (public) */

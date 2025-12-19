@@ -49,6 +49,7 @@ func main() {
 		admin.POST("/products", handlers.CreateProduct(db))
 		admin.PUT("/products/:id", handlers.UpdateProduct(db))
 		admin.DELETE("/products/:id", handlers.DeleteProduct(db))
+		admin.POST("/products/bulk-delete", handlers.BulkDeleteProducts(db))
 
 		admin.GET("/categories", handlers.GetAllCategories(db))
 		admin.POST("/categories", handlers.CreateCategory(db))

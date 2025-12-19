@@ -37,6 +37,10 @@ type ProductUpdateRequest struct {
 	IsCampaign *bool     `json:"isCampaign"`
 }
 
+type ProductBulkDeleteRequest struct {
+	IDs []string `json:"ids" binding:"required"`
+}
+
 /* =======================
    HELPERS
 ======================= */
@@ -78,6 +82,11 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 
 		if category := strings.TrimSpace(c.Query("category")); category != "" {
 			filter["category"] = bson.M{"$in": []string{category}}
+		}
+
+		includeDeleted := strings.EqualFold(strings.TrimSpace(c.Query("includeDeleted")), "true")
+		if !includeDeleted {
+			filter["isDeleted"] = bson.M{"$ne": true}
 		}
 
 		if search := strings.TrimSpace(c.Query("search")); search != "" {
@@ -153,6 +162,7 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 			isCampaign = *req.IsCampaign
 		}
 
+		now := time.Now()
 		product := models.Product{
 			Name:       req.Name,
 			Price:      req.Price,
@@ -160,7 +170,8 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 			ImageURL:   req.ImageURL,
 			IsActive:   isActive,
 			IsCampaign: isCampaign,
-			CreatedAt:  time.Now(),
+			CreatedAt:  now,
+			UpdatedAt:  now,
 		}
 
 		res, err := db.Collection("products").InsertOne(context.Background(), product)
@@ -225,6 +236,23 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
+		var existing models.Product
+		if err := db.Collection("products").FindOne(context.Background(), bson.M{"_id": id}).Decode(&existing); err != nil {
+			if err == mongo.ErrNoDocuments {
+				c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+			return
+		}
+
+		if existing.IsDeleted {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "product is deleted"})
+			return
+		}
+
+		update["updatedAt"] = time.Now()
+
 		var updated models.Product
 		err = db.Collection("products").FindOneAndUpdate(
 			context.Background(),
@@ -258,22 +286,98 @@ func DeleteProduct(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
-		res, err := db.Collection("products").UpdateOne(
-			context.Background(),
-			bson.M{"_id": id},
-			bson.M{"$set": bson.M{"isActive": false}},
-		)
+		ctx := context.Background()
+		var product models.Product
+		if err := db.Collection("products").FindOne(ctx, bson.M{"_id": id}).Decode(&product); err != nil {
+			if err == mongo.ErrNoDocuments {
+				c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+			return
+		}
 
+		if product.IsDeleted {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "product already deleted"})
+			return
+		}
+
+		now := time.Now()
+		update := bson.M{
+			"isDeleted":  true,
+			"deletedAt":  now,
+			"updatedAt":  now,
+			"isActive":   false,
+			"isCampaign": false,
+		}
+
+		if _, err := db.Collection("products").UpdateByID(ctx, id, bson.M{"$set": update}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Product deleted successfully"})
+	}
+}
+
+/* =======================
+   BULK DELETE (SOFT)
+======================= */
+
+func BulkDeleteProducts(db *mongo.Database) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req ProductBulkDeleteRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+
+		if len(req.IDs) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "ids required"})
+			return
+		}
+
+		objectIDs := make([]primitive.ObjectID, 0, len(req.IDs))
+		for _, raw := range req.IDs {
+			id, err := primitive.ObjectIDFromHex(strings.TrimSpace(raw))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id: " + raw})
+				return
+			}
+			objectIDs = append(objectIDs, id)
+		}
+
+		now := time.Now()
+		filter := bson.M{
+			"_id":       bson.M{"$in": objectIDs},
+			"isDeleted": bson.M{"$ne": true},
+		}
+		update := bson.M{
+			"$set": bson.M{
+				"isDeleted":  true,
+				"deletedAt":  now,
+				"updatedAt":  now,
+				"isActive":   false,
+				"isCampaign": false,
+			},
+		}
+
+		res, err := db.Collection("products").UpdateMany(context.Background(), filter, update)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
 		}
 
 		if res.MatchedCount == 0 {
-			c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "products not found"})
 			return
 		}
 
-		c.Status(http.StatusNoContent)
+		c.JSON(http.StatusOK, gin.H{
+			"message":        "Products deleted successfully",
+			"matchedCount":   res.MatchedCount,
+			"modifiedCount":  res.ModifiedCount,
+			"alreadyDeleted": res.MatchedCount - res.ModifiedCount,
+		})
 	}
 }
