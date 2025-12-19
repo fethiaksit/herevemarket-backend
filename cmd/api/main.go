@@ -27,18 +27,24 @@ func main() {
 
 	r.GET("/", handlers.Home())
 
-	r.POST("/auth/register", handlers.Register(db))
-	r.POST("/auth/login", handlers.Login(db, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL))
-	r.POST("/auth/refresh", handlers.Refresh(db, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL))
-	r.POST("/auth/logout", handlers.Logout(db))
+	public := r.Group("/")
+	{
+		public.GET("/products", handlers.GetProducts(db))
+		public.GET("/categories", handlers.GetCategories(db))
+	}
+
+	auth := r.Group("/auth")
+	{
+		auth.POST("/register", handlers.Register(db))
+		auth.POST("/login", handlers.Login(db, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL))
+		auth.POST("/refresh", handlers.Refresh(db, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL))
+		auth.POST("/logout", handlers.Logout(db))
+	}
 
 	r.POST("/admin/login", handlers.AdminLogin(db, cfg.JWTSecret, cfg.AccessTokenTTL))
 
-	r.GET("/products", handlers.GetProducts(db))
-	r.GET("/categories", handlers.GetCategories(db))
-
 	admin := r.Group("/admin")
-	admin.Use(middleware.AdminAuth(cfg.JWTSecret))
+	admin.Use(middleware.AdminAuthMiddleware(cfg.JWTSecret))
 	{
 		admin.GET("/me", func(c *gin.Context) {
 			c.JSON(200, gin.H{"ok": true})

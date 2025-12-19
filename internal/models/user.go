@@ -6,15 +6,12 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-type Customer struct {
+type User struct {
 	ID           primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	FirstName    string             `bson:"firstName" json:"firstName"`
-	LastName     string             `bson:"lastName" json:"lastName"`
+	Name         string             `bson:"name" json:"name"`
 	Email        string             `bson:"email" json:"email"`
-	Phone        string             `bson:"phone,omitempty" json:"phone,omitempty"`
 	PasswordHash string             `bson:"passwordHash" json:"-"`
-	IsActive     bool               `bson:"isActive" json:"isActive"`
 	Role         string             `bson:"role" json:"role"`
+	IsActive     bool               `bson:"isActive" json:"isActive"`
 	CreatedAt    time.Time          `bson:"createdAt" json:"createdAt"`
-	UpdatedAt    time.Time          `bson:"updatedAt" json:"updatedAt"`
 }
