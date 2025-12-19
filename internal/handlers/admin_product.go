@@ -108,27 +108,10 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 		}
 		defer cursor.Close(ctx)
 
-		products := make([]models.Product, 0)
-
-		for cursor.Next(ctx) {
-			var p models.Product
-			if err := cursor.Decode(&p); err != nil {
-				// ⛑ eski string category kayıtları için fallback
-				var raw bson.M
-				_ = cursor.Decode(&raw)
-
-				if cat, ok := raw["category"].(string); ok {
-					raw["category"] = []string{cat}
-					bytes, _ := bson.Marshal(raw)
-					_ = bson.Unmarshal(bytes, &p)
-					products = append(products, p)
-					continue
-				}
-
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "decode error"})
-				return
-			}
-			products = append(products, p)
+		products, err := decodeProducts(ctx, cursor)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "decode error"})
+			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{
@@ -165,13 +148,19 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 			isActive = *req.IsActive
 		}
 
+		isCampaign := false
+		if req.IsCampaign != nil {
+			isCampaign = *req.IsCampaign
+		}
+
 		product := models.Product{
-			Name:      req.Name,
-			Price:     req.Price,
-			Category:  models.StringList(categories),
-			ImageURL:  req.ImageURL,
-			IsActive:  isActive,
-			CreatedAt: time.Now(),
+			Name:       req.Name,
+			Price:      req.Price,
+			Category:   models.StringList(categories),
+			ImageURL:   req.ImageURL,
+			IsActive:   isActive,
+			IsCampaign: isCampaign,
+			CreatedAt:  time.Now(),
 		}
 
 		res, err := db.Collection("products").InsertOne(context.Background(), product)
@@ -226,6 +215,9 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 		}
 		if req.IsActive != nil {
 			update["isActive"] = *req.IsActive
+		}
+		if req.IsCampaign != nil {
+			update["isCampaign"] = *req.IsCampaign
 		}
 
 		if len(update) == 0 {

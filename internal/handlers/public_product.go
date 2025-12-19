@@ -9,8 +9,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-
-	"backend/internal/models"
 )
 
 func GetProducts(db *mongo.Database) gin.HandlerFunc {
@@ -51,8 +49,8 @@ func GetProducts(db *mongo.Database) gin.HandlerFunc {
 		}
 		defer cursor.Close(context.Background())
 
-		var products []models.Product
-		if err := cursor.All(context.Background(), &products); err != nil {
+		products, err := decodeProducts(context.Background(), cursor)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "decode error"})
 			return
 		}
