@@ -27,7 +27,12 @@ func main() {
 
 	r.GET("/", handlers.Home())
 
-	r.POST("/admin/login", handlers.AdminLogin(db, cfg.JWTSecret))
+	r.POST("/auth/register", handlers.Register(db))
+	r.POST("/auth/login", handlers.Login(db, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL))
+	r.POST("/auth/refresh", handlers.Refresh(db, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL))
+	r.POST("/auth/logout", handlers.Logout(db))
+
+	r.POST("/admin/login", handlers.AdminLogin(db, cfg.JWTSecret, cfg.AccessTokenTTL))
 
 	r.GET("/products", handlers.GetProducts(db))
 	r.GET("/categories", handlers.GetCategories(db))
