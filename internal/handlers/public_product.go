@@ -21,9 +21,7 @@ func GetProducts(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
-		// Include products that are explicitly active as well as legacy entries
-		// where the isActive flag might be missing.
-		filter := bson.M{"isActive": bson.M{"$ne": false}}
+		filter := bson.M{"isActive": true}
 
 		if category := strings.TrimSpace(c.Query("category")); category != "" {
 			filter["category"] = bson.M{"$in": []string{category}}

@@ -21,18 +21,9 @@ import (
 )
 
 type RegisterRequest struct {
-	FirstName string `json:"firstName" binding:"required"`
-	LastName  string `json:"lastName" binding:"required"`
-	Email     string `json:"email" binding:"required"`
-	Password  string `json:"password" binding:"required"`
-	Phone     string `json:"phone"`
-}
-
-type LoginResponseUser struct {
-	ID        string `json:"id"`
-	FirstName string `json:"firstName"`
-	LastName  string `json:"lastName"`
-	Email     string `json:"email"`
+	Name     string `json:"name" binding:"required"`
+	Email    string `json:"email" binding:"required"`
+	Password string `json:"password" binding:"required"`
 }
 
 type LoginRequest struct {
@@ -42,6 +33,12 @@ type LoginRequest struct {
 
 type RefreshRequest struct {
 	RefreshToken string `json:"refreshToken" binding:"required"`
+}
+
+type LoginResponseUser struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 type AuthTokens struct {
@@ -58,16 +55,18 @@ func Register(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
+		name := strings.TrimSpace(req.Name)
 		email := strings.ToLower(strings.TrimSpace(req.Email))
-		if email == "" || strings.TrimSpace(req.Password) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "email and password are required"})
+
+		if name == "" || email == "" || strings.TrimSpace(req.Password) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name, email and password are required"})
 			return
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		count, err := db.Collection("customers").CountDocuments(ctx, bson.M{"email": email})
+		count, err := db.Collection("users").CountDocuments(ctx, bson.M{"email": email})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
@@ -84,24 +83,21 @@ func Register(db *mongo.Database) gin.HandlerFunc {
 		}
 
 		now := time.Now()
-		customer := models.Customer{
-			FirstName:    strings.TrimSpace(req.FirstName),
-			LastName:     strings.TrimSpace(req.LastName),
+		user := models.User{
+			Name:         name,
 			Email:        email,
-			Phone:        strings.TrimSpace(req.Phone),
 			PasswordHash: string(hash),
-			IsActive:     true,
 			Role:         "user",
+			IsActive:     true,
 			CreatedAt:    now,
-			UpdatedAt:    now,
 		}
 
-		if _, err := db.Collection("customers").InsertOne(ctx, customer); err != nil {
+		if _, err := db.Collection("users").InsertOne(ctx, user); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
 		}
 
-		c.JSON(http.StatusCreated, gin.H{"message": "User registered successfully"})
+		c.JSON(http.StatusCreated, gin.H{"message": "user registered successfully"})
 	}
 }
 
@@ -122,14 +118,14 @@ func Login(db *mongo.Database, jwtSecret string, accessTTL, refreshTTL time.Dura
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		var user models.Customer
-		if err := db.Collection("customers").FindOne(ctx, bson.M{"email": email}).Decode(&user); err != nil {
+		var user models.User
+		if err := db.Collection("users").FindOne(ctx, bson.M{"email": email}).Decode(&user); err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 			return
 		}
 
 		if !user.IsActive {
-			c.JSON(http.StatusForbidden, gin.H{"error": "user is inactive"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
 
@@ -148,10 +144,9 @@ func Login(db *mongo.Database, jwtSecret string, accessTTL, refreshTTL time.Dura
 			"refreshToken": tokens.RefreshToken,
 			"expiresIn":    tokens.ExpiresIn,
 			"user": LoginResponseUser{
-				ID:        user.ID.Hex(),
-				FirstName: user.FirstName,
-				LastName:  user.LastName,
-				Email:     user.Email,
+				ID:    user.ID.Hex(),
+				Name:  user.Name,
+				Email: user.Email,
 			},
 		})
 	}
@@ -186,18 +181,18 @@ func Refresh(db *mongo.Database, jwtSecret string, accessTTL, refreshTTL time.Du
 
 		if time.Now().After(token.ExpiresAt) {
 			_, _ = db.Collection("refresh_tokens").UpdateByID(ctx, token.ID, bson.M{"$set": bson.M{"revoked": true}})
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh token expired"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "token_expired"})
 			return
 		}
 
-		var user models.Customer
-		if err := db.Collection("customers").FindOne(ctx, bson.M{"_id": token.UserID}).Decode(&user); err != nil {
+		var user models.User
+		if err := db.Collection("users").FindOne(ctx, bson.M{"_id": token.UserID}).Decode(&user); err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
 			return
 		}
 
 		if !user.IsActive {
-			c.JSON(http.StatusForbidden, gin.H{"error": "user is inactive"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
 
@@ -218,10 +213,9 @@ func Refresh(db *mongo.Database, jwtSecret string, accessTTL, refreshTTL time.Du
 			"refreshToken": newTokens.RefreshToken,
 			"expiresIn":    newTokens.ExpiresIn,
 			"user": LoginResponseUser{
-				ID:        user.ID.Hex(),
-				FirstName: user.FirstName,
-				LastName:  user.LastName,
-				Email:     user.Email,
+				ID:    user.ID.Hex(),
+				Name:  user.Name,
+				Email: user.Email,
 			},
 		})
 	}
