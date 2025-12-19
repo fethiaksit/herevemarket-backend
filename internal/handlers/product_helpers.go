@@ -9,23 +9,25 @@ import (
 	"backend/internal/models"
 )
 
+func parseOptionalBool(value interface{}, defaultValue bool) bool {
+	switch typed := value.(type) {
+	case string:
+		return typed == "true"
+	case bool:
+		return typed
+	default:
+		return defaultValue
+	}
+}
+
 func normalizeProductDocument(raw bson.M) (models.Product, error) {
 	if cat, ok := raw["category"].(string); ok {
 		raw["category"] = []string{cat}
 	}
 
-	if val, ok := raw["isCampaign"]; ok {
-		switch typed := val.(type) {
-		case string:
-			raw["isCampaign"] = typed == "true"
-		case bool:
-			// already bool, keep as is
-		default:
-			raw["isCampaign"] = false
-		}
-	} else {
-		raw["isCampaign"] = false
-	}
+	raw["isCampaign"] = parseOptionalBool(raw["isCampaign"], false)
+	raw["isActive"] = parseOptionalBool(raw["isActive"], true)
+	raw["isDeleted"] = parseOptionalBool(raw["isDeleted"], false)
 
 	data, err := bson.Marshal(raw)
 	if err != nil {
