@@ -126,6 +126,7 @@ hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
       <option value="">Kategori Seç</option>
     </select>
     <input name="imageUrl" placeholder="Görsel URL">
+    <label><input type="checkbox" name="isCampaign"> Kampanyalı</label>
     <button type="submit">Ekle</button>
   </form>
 
@@ -144,6 +145,7 @@ hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
     </select>
     <label>Görsel URL</label>
     <input name="imageUrl" placeholder="Görsel URL">
+    <label><input type="checkbox" name="isCampaign"> Kampanyalı</label>
     <label><input type="checkbox" name="isActive"> Aktif</label>
     <button type="submit">Güncelle</button>
     <button type="button" id="deleteProduct" class="danger">Pasifleştir</button>
@@ -367,10 +369,11 @@ async function loadProducts() {
     const categoryLabel = Array.isArray(p.category)
       ? (p.category.length ? p.category.join(", ") : "-")
       : (p.category || "-");
+    const campaignLabel = p.isCampaign ? "Kampanyalı" : "Standart";
     card.innerHTML =
       "<div><strong>" + (p.name || "-") + "</strong></div>" +
       "<div class='muted'>" +
-        (p.price ?? "-") + " • " + categoryLabel + " • " + (p.isActive ? "Aktif" : "Pasif") +
+        (p.price ?? "-") + " • " + categoryLabel + " • " + campaignLabel + " • " + (p.isActive ? "Aktif" : "Pasif") +
       "</div>";
     card.onclick = function() { selectProduct(p); };
     el.appendChild(card);
@@ -407,6 +410,7 @@ async function selectProduct(p) {
   f.elements.name.value = p.name || "";
   f.elements.price.value = (p.price ?? "");
   f.elements.imageUrl.value = p.imageUrl || "";
+  f.elements.isCampaign.checked = !!p.isCampaign;
   f.elements.isActive.checked = !!p.isActive;
 }
 
@@ -485,6 +489,7 @@ document.getElementById("addProduct").onsubmit = async function(e) {
       price: price,
       category: categories,
       imageUrl: f.get("imageUrl"),
+      isCampaign: f.get("isCampaign") === "on",
       isActive: true
     })
   });
@@ -516,6 +521,7 @@ document.getElementById("editProduct").onsubmit = async function(e) {
       price: price,
       category: categories,
       imageUrl: f.get("imageUrl"),
+      isCampaign: f.get("isCampaign") === "on",
       isActive: f.get("isActive") === "on"
     })
   });

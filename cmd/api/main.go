@@ -30,6 +30,7 @@ func main() {
 	public := r.Group("/")
 	{
 		public.GET("/products", handlers.GetProducts(db))
+		public.GET("/products/campaign", handlers.GetCampaignProducts(db))
 		public.GET("/categories", handlers.GetCategories(db))
 	}
 
