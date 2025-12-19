@@ -20,19 +20,21 @@ import (
 ======================= */
 
 type ProductCreateRequest struct {
-	Name     string   `json:"name" binding:"required"`
-	Price    float64  `json:"price" binding:"required"`
-	Category []string `json:"category" binding:"required"`
-	ImageURL string   `json:"imageUrl" binding:"required"`
-	IsActive *bool    `json:"isActive"`
+	Name       string   `json:"name" binding:"required"`
+	Price      float64  `json:"price" binding:"required"`
+	Category   []string `json:"category" binding:"required"`
+	ImageURL   string   `json:"imageUrl" binding:"required"`
+	IsActive   *bool    `json:"isActive"`
+	IsCampaign *bool    `json:"isCampaign"`
 }
 
 type ProductUpdateRequest struct {
-	Name     *string   `json:"name"`
-	Price    *float64  `json:"price"`
-	Category *[]string `json:"category"`
-	ImageURL *string   `json:"imageUrl"`
-	IsActive *bool     `json:"isActive"`
+	Name       *string   `json:"name"`
+	Price      *float64  `json:"price"`
+	Category   *[]string `json:"category"`
+	ImageURL   *string   `json:"imageUrl"`
+	IsActive   *bool     `json:"isActive"`
+	IsCampaign *bool     `json:"isCampaign"`
 }
 
 /* =======================
