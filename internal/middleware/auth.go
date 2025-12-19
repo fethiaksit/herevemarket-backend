@@ -8,16 +8,16 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func AdminAuth(secret string) gin.HandlerFunc {
+func AuthGuard(secret string, allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		auth := c.GetHeader("Authorization")
-		if auth == "" {
+		raw := strings.TrimSpace(c.GetHeader("Authorization"))
+		if raw == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
 			return
 		}
 
-		parts := strings.Split(auth, " ")
-		if len(parts) != 2 {
+		parts := strings.Split(raw, " ")
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
 		}
@@ -25,12 +25,37 @@ func AdminAuth(secret string) gin.HandlerFunc {
 		token, err := jwt.Parse(parts[1], func(t *jwt.Token) (interface{}, error) {
 			return []byte(secret), nil
 		})
-
 		if err != nil || !token.Valid {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
 
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+
+		role, _ := claims["role"].(string)
+		if len(allowedRoles) > 0 {
+			match := false
+			for _, r := range allowedRoles {
+				if role == r {
+					match = true
+					break
+				}
+			}
+			if !match {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+				return
+			}
+		}
+
+		c.Set("claims", claims)
 		c.Next()
 	}
+}
+
+func AdminAuth(secret string) gin.HandlerFunc {
+	return AuthGuard(secret, "admin")
 }
