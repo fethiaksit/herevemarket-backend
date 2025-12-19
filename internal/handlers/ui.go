@@ -222,7 +222,7 @@ hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
 </div>
 
 <script>
-let token = "";
+let token = localStorage.getItem("adminToken") || "";
 let selectedCategory = null;
 let selectedProduct = null;
 const selectedProductIds = new Set();
@@ -230,6 +230,15 @@ const selectedProductIds = new Set();
 /* id helper: mongo bazen _id, bazen id döner */
 function getId(obj) {
   return (obj && (obj._id || obj.id)) ? (obj._id || obj.id) : null;
+}
+
+function setToken(value) {
+  token = (value || "").trim();
+  if (hasToken()) {
+    localStorage.setItem("adminToken", token);
+  } else {
+    localStorage.removeItem("adminToken");
+  }
 }
 
 function hasToken() {
@@ -395,7 +404,7 @@ document.getElementById("loginForm").onsubmit = async function(e) {
     return;
   }
 
-  token = j.token;
+  setToken(j.token);
   setText("loginStatus", "Giriş başarılı ✅");
   await loadCategories();
   await loadProducts();
@@ -407,7 +416,7 @@ async function loadCategories() {
   const filterSelect = document.getElementById("categoryFilter");
   const preserved = filterSelect ? filterSelect.value : "";
 
-  const catRes = await fetch("/categories");
+  const catRes = await fetch(hasToken() ? "/admin/categories" : "/categories", hasToken() ? { headers: authHeaders() } : undefined);
   const catPayload = await safeJson(catRes);
   const catData = (catPayload && catPayload.data) ? catPayload.data : (catPayload || []);
 
@@ -432,27 +441,15 @@ async function loadCategories() {
     filterSelect.value = exists ? preserved : "";
   }
 
-  // 2) liste: admin varsa admin categories (aktif/pasif), yoksa public
-  let listUrl = "/categories";
-  let listInit = undefined;
-  if (hasToken()) {
-    listUrl = "/admin/categories";
-    listInit = { headers: authHeaders() };
-  }
-
-  const res = await fetch(listUrl, listInit);
-  const payload = await safeJson(res);
-  const data = (payload && payload.data) ? payload.data : (payload || []);
-
   const el = document.getElementById("categoryList");
   el.innerHTML = "";
 
-  if (!Array.isArray(data) || data.length === 0) {
+  if (!Array.isArray(catData) || catData.length === 0) {
     el.innerHTML = "<div class='muted'>Kategori yok</div>";
     return;
   }
 
-  data.forEach(function(c) {
+  catData.forEach(function(c) {
     const card = document.createElement("div");
     card.className = "card clickable";
     card.innerHTML = "<div><strong>" + (c.name || "-") + "</strong></div>" +
