@@ -21,7 +21,10 @@ func GetProducts(db *mongo.Database) gin.HandlerFunc {
 
 		// Include products that are explicitly active as well as legacy entries
 		// where the isActive flag might be missing.
-		filter := bson.M{"isActive": bson.M{"$ne": false}}
+		filter := bson.M{
+			"isActive":  bson.M{"$ne": false},
+			"isDeleted": bson.M{"$ne": true},
+		}
 
 		if category := strings.TrimSpace(c.Query("category")); category != "" {
 			filter["category"] = bson.M{"$in": []string{category}}
@@ -76,6 +79,7 @@ func GetCampaignProducts(db *mongo.Database) gin.HandlerFunc {
 		filter := bson.M{
 			"isActive":   true,
 			"isCampaign": true,
+			"isDeleted":  bson.M{"$ne": true},
 		}
 
 		findOptions := options.Find().
