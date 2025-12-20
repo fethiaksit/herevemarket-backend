@@ -313,7 +313,7 @@ function syncBulkDeleteButton() {
   const count = selectedProductIds.size;
   btn.disabled = !hasToken() || count === 0;
   btn.textContent = count > 0
-    ? `Seçili ürünleri sil (${count})`
+    ? "Seçili ürünleri sil (" + count + ")"
     : "Seçili ürünleri sil";
 }
 
@@ -639,7 +639,7 @@ async function selectProduct(p) {
 async function handleDeleteProduct(id) {
   if (!hasToken()) { alert("Önce admin login ol"); return; }
 
-  const confirmed = await showConfirm("Bu ürünü silmek istediğine emin misin? Bu işlem geri alınamaz.");
+  const confirmed = await showConfirm("Bu ürünü silmek istediğinize emin misiniz?");
   if (!confirmed) return;
 
   const res = await fetch("/admin/products/" + id, {
@@ -660,7 +660,8 @@ async function handleDeleteProduct(id) {
   }
   selectedProductIds.delete(id);
   await loadProducts();
-  showToast((payload && payload.message) ? payload.message : "Ürün silindi");
+  const successMessage = (payload && payload.message) ? payload.message : "Ürün silindi";
+  showToast(successMessage);
 }
 
 async function handleBulkDelete() {

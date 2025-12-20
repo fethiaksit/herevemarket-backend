@@ -86,7 +86,7 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 
 		includeDeleted := strings.EqualFold(strings.TrimSpace(c.Query("includeDeleted")), "true")
 		if !includeDeleted {
-			filter["isDeleted"] = bson.M{"$ne": true}
+			filter["isDeleted"] = false
 		}
 
 		if search := strings.TrimSpace(c.Query("search")); search != "" {
@@ -316,7 +316,7 @@ func DeleteProduct(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"message": "Product deleted successfully"})
+		c.JSON(http.StatusOK, gin.H{"message": "Ürün silindi"})
 	}
 }
 
