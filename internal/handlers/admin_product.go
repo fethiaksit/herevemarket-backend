@@ -85,7 +85,7 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 		}
 
 		if isActive := strings.TrimSpace(c.Query("isActive")); isActive != "" {
-			filter["isActive"] = isActive == "true"
+			filter["isDeleted"] = false
 		}
 
 		ctx := context.Background()
