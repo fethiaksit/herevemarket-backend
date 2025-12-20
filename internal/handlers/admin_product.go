@@ -74,7 +74,9 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
-		filter := bson.M{}
+		filter := bson.M{
+			"isDeleted": bson.M{"$ne": true},
+		}
 
 		if category := strings.TrimSpace(c.Query("category")); category != "" {
 			filter["category"] = bson.M{"$in": []string{category}}
@@ -85,7 +87,7 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 		}
 
 		if isActive := strings.TrimSpace(c.Query("isActive")); isActive != "" {
-			filter["isDeleted"] = false
+			filter["isActive"] = strings.EqualFold(isActive, "true")
 		}
 
 		ctx := context.Background()
@@ -153,6 +155,8 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 			isCampaign = *req.IsCampaign
 		}
 
+		now := time.Now()
+
 		product := models.Product{
 			Name:       req.Name,
 			Price:      req.Price,
@@ -160,7 +164,8 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 			ImageURL:   req.ImageURL,
 			IsActive:   isActive,
 			IsCampaign: isCampaign,
-			CreatedAt:  time.Now(),
+			IsDeleted:  false,
+			CreatedAt:  now,
 		}
 
 		res, err := db.Collection("products").InsertOne(context.Background(), product)
@@ -228,7 +233,10 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 		var updated models.Product
 		err = db.Collection("products").FindOneAndUpdate(
 			context.Background(),
-			bson.M{"_id": id},
+			bson.M{
+				"_id":       id,
+				"isDeleted": bson.M{"$ne": true},
+			},
 			bson.M{"$set": update},
 			options.FindOneAndUpdate().SetReturnDocument(options.After),
 		).Decode(&updated)
@@ -258,10 +266,19 @@ func DeleteProduct(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
+		now := time.Now()
+
 		res, err := db.Collection("products").UpdateOne(
 			context.Background(),
-			bson.M{"_id": id},
-			bson.M{"$set": bson.M{"isActive": false}},
+			bson.M{
+				"_id":       id,
+				"isDeleted": bson.M{"$ne": true},
+			},
+			bson.M{"$set": bson.M{
+				"isDeleted": true,
+				"deletedAt": now,
+				"isActive":  false,
+			}},
 		)
 
 		if err != nil {
@@ -274,6 +291,6 @@ func DeleteProduct(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
-		c.Status(http.StatusNoContent)
+		c.JSON(http.StatusOK, gin.H{"message": "product deleted"})
 	}
 }

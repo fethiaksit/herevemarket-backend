@@ -56,7 +56,18 @@ button {
   font-weight: 700;
   cursor: pointer;
 }
+button.small { padding: 6px 10px; font-weight: 600; }
+button.ghost {
+  background: white;
+  color: #0b2d66;
+  border: 1px solid #cbd5e1;
+}
 button.danger { background: #dc2626; }
+button.danger.ghost {
+  color: #dc2626;
+  border-color: #fecdd3;
+  background: #fff1f2;
+}
 .clickable { cursor: pointer; }
 .card {
   border: 1px solid #e2e8f0;
@@ -64,6 +75,14 @@ button.danger { background: #dc2626; }
   padding: 8px;
   cursor: pointer;
 }
+.card.product-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.inline-actions { display: flex; gap: 8px; }
+.stacked-text { display: grid; gap: 4px; }
 .list { display: grid; gap: 6px; }
 .muted { color: #475569; font-size: 0.9rem; }
 .stacked { display: grid; gap: 10px; }
@@ -130,6 +149,7 @@ hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
   </form>
 
   <div id="productList" class="list"></div>
+  <div id="productStatus" class="muted"></div>
 
   <form id="editProduct" class="stacked" style="display:none; margin-top:10px;">
     <hr>
@@ -156,6 +176,7 @@ hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
 let token = "";
 let selectedCategory = null;
 let selectedProduct = null;
+let currentProducts = [];
 
 /* id helper: mongo bazen _id, bazen id döner */
 function getId(obj) {
@@ -180,6 +201,10 @@ async function safeJson(res) {
 function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.innerText = text || "";
+}
+
+function setProductStatus(text) {
+  setText("productStatus", text || "");
 }
 
 function normalizeCategoryValues(values) {
@@ -341,18 +366,7 @@ document.getElementById("categoryFilter").onchange = function() {
 };
 
 /* PRODUCTS */
-async function loadProducts() {
-  const selected = document.getElementById("categoryFilter").value;
-  let url = hasToken() ? "/admin/products" : "/products";
-
-  if (selected) {
-    url += "?" + new URLSearchParams({ category: selected }).toString();
-  }
-
-  const res = await fetch(url, hasToken() ? { headers: authHeaders() } : undefined);
-  const payload = await safeJson(res);
-  const data = (payload && payload.data) ? payload.data : (payload || []);
-
+function renderProductList(data) {
   const el = document.getElementById("productList");
   el.innerHTML = "";
 
@@ -362,19 +376,67 @@ async function loadProducts() {
   }
 
   data.forEach(function(p) {
-    const card = document.createElement("div");
-    card.className = "card clickable";
     const categoryLabel = Array.isArray(p.category)
       ? (p.category.length ? p.category.join(", ") : "-")
       : (p.category || "-");
-    card.innerHTML =
+
+    const row = document.createElement("div");
+    row.className = "card product-row";
+
+    const info = document.createElement("div");
+    info.className = "stacked-text clickable";
+    info.innerHTML =
       "<div><strong>" + (p.name || "-") + "</strong></div>" +
       "<div class='muted'>" +
         (p.price ?? "-") + " • " + categoryLabel + " • " + (p.isActive ? "Aktif" : "Pasif") +
       "</div>";
-    card.onclick = function() { selectProduct(p); };
-    el.appendChild(card);
+    info.onclick = function() { selectProduct(p); };
+
+    row.appendChild(info);
+
+    if (hasToken()) {
+      const actions = document.createElement("div");
+      actions.className = "inline-actions";
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "danger ghost small";
+      deleteBtn.textContent = "Sil";
+      deleteBtn.onclick = function(ev) {
+        ev.stopPropagation();
+        handleDeleteProduct(p);
+      };
+
+      actions.appendChild(deleteBtn);
+      row.appendChild(actions);
+    }
+
+    el.appendChild(row);
   });
+}
+
+async function loadProducts() {
+  const selected = document.getElementById("categoryFilter").value;
+  let url = hasToken() ? "/admin/products" : "/products";
+
+  if (selected) {
+    url += "?" + new URLSearchParams({ category: selected }).toString();
+  }
+
+  setProductStatus("Ürünler yükleniyor...");
+
+  const res = await fetch(url, hasToken() ? { headers: authHeaders() } : undefined);
+  const payload = await safeJson(res);
+  if (!res.ok) {
+    setProductStatus("Hata: ürünler getirilemedi");
+    return;
+  }
+
+  const data = (payload && payload.data) ? payload.data : (payload || []);
+  currentProducts = Array.isArray(data) ? data : [];
+
+  renderProductList(currentProducts);
+  setProductStatus("");
 }
 
 /* SELECT */
@@ -408,6 +470,38 @@ async function selectProduct(p) {
   f.elements.price.value = (p.price ?? "");
   f.elements.imageUrl.value = p.imageUrl || "";
   f.elements.isActive.checked = !!p.isActive;
+}
+
+async function handleDeleteProduct(product) {
+  if (!hasToken()) { alert("Önce admin login ol"); return; }
+  if (!product) return;
+
+  const id = getId(product);
+  if (!id) { alert("Ürün id yok"); return; }
+
+  const confirmed = confirm("Bu ürünü silmek istediğinize emin misiniz?");
+  if (!confirmed) return;
+
+  const res = await fetch("/admin/products/" + id, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
+  const payload = await safeJson(res);
+
+  if (!res.ok) {
+    alert("Silme başarısız: " + ((payload && payload.error) ? payload.error : res.statusText));
+    return;
+  }
+
+  currentProducts = currentProducts.filter(function(item) { return getId(item) !== id; });
+  if (selectedProduct && getId(selectedProduct) === id) {
+    selectedProduct = null;
+    document.getElementById("editProduct").style.display = "none";
+  }
+
+  renderProductList(currentProducts);
+  setProductStatus("Ürün silindi");
+  alert("Ürün silindi");
 }
 
 /* CATEGORY CRUD (admin required) */
@@ -527,17 +621,7 @@ document.getElementById("deleteProduct").onclick = async function() {
   if (!hasToken()) { alert("Önce admin login ol"); return; }
   if (!selectedProduct) return;
 
-  const id = getId(selectedProduct);
-  if (!id) { alert("Ürün id yok"); return; }
-
-  await fetch("/admin/products/" + id, {
-    method: "DELETE",
-    headers: authHeaders()
-  });
-
-  selectedProduct = null;
-  document.getElementById("editProduct").style.display = "none";
-  loadProducts();
+  await handleDeleteProduct(selectedProduct);
 };
 
 /* initial load (public) */

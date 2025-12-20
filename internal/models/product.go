@@ -14,5 +14,7 @@ type Product struct {
 	ImageURL   string             `bson:"imageUrl" json:"imageUrl"`
 	IsActive   bool               `bson:"isActive" json:"isActive"`
 	IsCampaign bool               `bson:"isCampaign" json:"isCampaign"`
+	IsDeleted  bool               `bson:"isDeleted" json:"isDeleted,omitempty"`
+	DeletedAt  *time.Time         `bson:"deletedAt,omitempty" json:"deletedAt,omitempty"`
 	CreatedAt  time.Time          `bson:"createdAt" json:"createdAt"`
 }
