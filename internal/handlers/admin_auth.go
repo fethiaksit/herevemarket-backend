@@ -34,10 +34,18 @@ func AdminLogin(db *mongo.Database, jwtSecret string, accessTTL time.Duration) g
 			return
 		}
 
-		var admin models.Admin
-		err := db.Collection("admins").FindOne(
-			context.Background(),
-			bson.M{"email": email},
+		// 🔴 ESKİ: admins collection
+		// ✅ YENİ: customers + role=admin
+		var admin models.Customer
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		err := db.Collection("customers").FindOne(
+			ctx,
+			bson.M{
+				"email": email,
+				"role":  "admin",
+			},
 		).Decode(&admin)
 
 		if err != nil {
@@ -45,11 +53,16 @@ func AdminLogin(db *mongo.Database, jwtSecret string, accessTTL time.Duration) g
 			return
 		}
 
-		if err := bcrypt.CompareHashAndPassword([]byte(admin.Password), []byte(req.Password)); err != nil && admin.Password != req.Password {
+		// 🔑 Şifre kontrolü (Customer’daki HASH ile)
+		if err := bcrypt.CompareHashAndPassword(
+			[]byte(admin.PasswordHash),
+			[]byte(req.Password),
+		); err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 			return
 		}
 
+		// ✅ TOKEN
 		claims := jwt.MapClaims{
 			"sub":   admin.ID.Hex(),
 			"role":  "admin",
@@ -64,6 +77,8 @@ func AdminLogin(db *mongo.Database, jwtSecret string, accessTTL time.Duration) g
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"token": signed})
+		c.JSON(http.StatusOK, gin.H{
+			"token": signed,
+		})
 	}
 }

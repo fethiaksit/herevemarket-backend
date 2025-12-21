@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"github.com/gin-gonic/gin"
 
@@ -12,34 +13,44 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	config.Load()
 
-	log.Println("MONGO_URI =", cfg.MongoURI)
-
-	client, err := database.Connect(cfg.MongoURI)
+	client, err := database.Connect(config.AppEnv.MongoURI)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	db := client.Database(cfg.DBName)
+	db := client.Database(config.AppEnv.DBName)
+
+	log.Println("MongoDB connected to:", db.Name())
 
 	r := gin.Default()
 
 	r.GET("/", handlers.Home())
 
 	r.POST("/auth/register", handlers.Register(db))
-	r.POST("/auth/login", handlers.Login(db, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL))
-	r.POST("/auth/refresh", handlers.Refresh(db, cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL))
+	r.POST("/auth/login", handlers.Login(
+		db,
+		config.AppEnv.JWTSecret,
+		config.AppEnv.AccessTokenTTL,
+		config.AppEnv.RefreshTokenTTL,
+	))
+	r.POST("/auth/refresh", handlers.Refresh(
+		db,
+		config.AppEnv.JWTSecret,
+		config.AppEnv.AccessTokenTTL,
+		config.AppEnv.RefreshTokenTTL,
+	))
 	r.POST("/auth/logout", handlers.Logout(db))
 
-	r.POST("/admin/login", handlers.AdminLogin(db, cfg.JWTSecret, cfg.AccessTokenTTL))
+	r.POST("/admin/login", handlers.AdminLogin(db, config.AppEnv.JWTSecret, config.AppEnv.AccessTokenTTL))
 
 	r.GET("/products", handlers.GetProducts(db))
 	r.GET("/categories", handlers.GetCategories(db))
 	r.GET("/products/campaign", handlers.GetCampaignProducts(db))
 
 	admin := r.Group("/admin")
-	admin.Use(middleware.AdminAuth(cfg.JWTSecret))
+	admin.Use(middleware.AdminAuth(config.AppEnv.JWTSecret))
 	{
 		admin.GET("/me", func(c *gin.Context) {
 			c.JSON(200, gin.H{"ok": true})
@@ -55,6 +66,9 @@ func main() {
 		admin.PUT("/categories/:id", handlers.UpdateCategory(db))
 		admin.DELETE("/categories/:id", handlers.DeleteCategory(db))
 	}
-
-	r.Run(":8080")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	r.Run(":" + port)
 }

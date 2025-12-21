@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+var AppEnv Config
+
 type Config struct {
 	MongoURI        string
 	DBName          string
@@ -15,14 +17,13 @@ type Config struct {
 	RefreshTokenTTL time.Duration
 }
 
-func Load() Config {
-	return Config{
-
-		MongoURI:        getEnvOrDefault("MONGO_URI", AppEnv.MongoURI),
-		DBName:          getEnvOrDefault("DB_NAME", AppEnv.DBName),
-		JWTSecret:       getEnvOrDefault("JWT_SECRET", AppEnv.JWTSecret),
-		AccessTokenTTL:  getDurationEnv("ACCESS_TOKEN_TTL_MINUTES", AppEnv.AccessTokenTTLMinutes, time.Minute),
-		RefreshTokenTTL: getDurationEnv("REFRESH_TOKEN_TTL_DAYS", AppEnv.RefreshTokenTTLDays, 24*time.Hour),
+func Load() {
+	AppEnv = Config{
+		MongoURI:        getEnvOrDefault("MONGO_URI", ""),
+		DBName:          getEnvOrDefault("DB_NAME", "heremarket"),
+		JWTSecret:       getEnvOrDefault("JWT_SECRET", ""),
+		AccessTokenTTL:  getDurationEnv("ACCESS_TOKEN_TTL", 20, time.Minute),
+		RefreshTokenTTL: getDurationEnv("REFRESH_TOKEN_TTL", 7, 24*time.Hour),
 	}
 }
 
