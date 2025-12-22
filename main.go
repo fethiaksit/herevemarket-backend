@@ -48,6 +48,7 @@ func main() {
 	r.GET("/products", handlers.GetProducts(db))
 	r.GET("/categories", handlers.GetCategories(db))
 	r.GET("/products/campaign", handlers.GetCampaignProducts(db))
+	r.POST("/orders", handlers.CreateOrder(db))
 
 	admin := r.Group("/admin")
 	admin.Use(middleware.AdminAuth(config.AppEnv.JWTSecret))
