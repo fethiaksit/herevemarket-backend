@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -151,7 +152,7 @@ func buildOrderFromRequest(req createOrderRequest) (models.Order, error) {
 			Price:     item.Price,
 			Quantity:  item.Quantity,
 		})
-
+		fmt.Println(items)
 		total += item.Price * float64(item.Quantity)
 	}
 
