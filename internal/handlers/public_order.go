@@ -14,6 +14,10 @@ import (
 	"backend/internal/models"
 )
 
+/* =========================
+   REQUEST DTOs
+========================= */
+
 type createOrderItemRequest struct {
 	ProductID string  `json:"productId" binding:"required"`
 	Name      string  `json:"name" binding:"required"`
@@ -27,12 +31,21 @@ type createOrderCustomerRequest struct {
 	Note   string `json:"note"`
 }
 
-type createOrderRequest struct {
-	Items         []createOrderItemRequest   `json:"items" binding:"required"`
-	TotalPrice    float64                    `json:"totalPrice"`
-	Customer      createOrderCustomerRequest `json:"customer" binding:"required"`
-	PaymentMethod string                     `json:"paymentMethod" binding:"required"`
+type createOrderPaymentMethodRequest struct {
+	ID    string `json:"id" binding:"required"`
+	Label string `json:"label"`
 }
+
+type createOrderRequest struct {
+	Items         []createOrderItemRequest        `json:"items" binding:"required"`
+	TotalPrice    float64                         `json:"totalPrice"`
+	Customer      createOrderCustomerRequest      `json:"customer" binding:"required"`
+	PaymentMethod createOrderPaymentMethodRequest `json:"paymentMethod" binding:"required"`
+}
+
+/* =========================
+   CREATE ORDER
+========================= */
 
 func CreateOrder(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -65,8 +78,7 @@ func CreateOrder(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
-		id, ok := res.InsertedID.(primitive.ObjectID)
-		if ok {
+		if id, ok := res.InsertedID.(primitive.ObjectID); ok {
 			order.ID = id
 		}
 
@@ -76,32 +88,43 @@ func CreateOrder(db *mongo.Database) gin.HandlerFunc {
 		})
 	}
 }
+
+/* =========================
+   GET ORDERS
+========================= */
+
 func GetOrders(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		collection := db.Collection("orders")
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer cancel()
 
-		cursor, err := collection.Find(c, bson.M{})
+		cursor, err := db.Collection("orders").Find(ctx, bson.M{})
 		if err != nil {
-			c.JSON(500, gin.H{"error": "Orders could not be fetched"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Orders could not be fetched"})
 			return
 		}
-		defer cursor.Close(c)
+		defer cursor.Close(ctx)
 
 		var orders []models.Order
-		if err := cursor.All(c, &orders); err != nil {
-			c.JSON(500, gin.H{"error": "Failed to parse orders"})
+		if err := cursor.All(ctx, &orders); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse orders"})
 			return
 		}
 
-		c.JSON(200, orders)
+		c.JSON(http.StatusOK, orders)
 	}
 }
+
+/* =========================
+   BUILD ORDER
+========================= */
+
 func buildOrderFromRequest(req createOrderRequest) (models.Order, error) {
 	if len(req.Items) == 0 {
 		return models.Order{}, errors.New("at least one item is required")
 	}
 
-	if req.PaymentMethod != "cash" && req.PaymentMethod != "card" {
+	if req.PaymentMethod.ID != "cash" && req.PaymentMethod.ID != "card" {
 		return models.Order{}, errors.New("invalid payment method")
 	}
 
@@ -136,7 +159,7 @@ func buildOrderFromRequest(req createOrderRequest) (models.Order, error) {
 		Items:         items,
 		TotalPrice:    total,
 		Customer:      models.OrderCustomer(req.Customer),
-		PaymentMethod: req.PaymentMethod,
+		PaymentMethod: req.PaymentMethod.ID, // 🔥 sadece "card" / "cash" kaydedilir
 		Status:        "pending",
 		CreatedAt:     time.Now(),
 	}
