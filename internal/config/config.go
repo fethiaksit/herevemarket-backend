@@ -1,10 +1,13 @@
 package config
 
 import (
+	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 var AppEnv Config
@@ -18,6 +21,9 @@ type Config struct {
 }
 
 func Load() {
+	if err := godotenv.Load(); err != nil {
+		log.Println(".env not loaded:", err)
+	}
 	AppEnv = Config{
 		MongoURI:        getEnvOrDefault("MONGO_URI", ""),
 		DBName:          getEnvOrDefault("DB_NAME", "heremarket"),

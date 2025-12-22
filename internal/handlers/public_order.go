@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 
@@ -75,7 +76,26 @@ func CreateOrder(db *mongo.Database) gin.HandlerFunc {
 		})
 	}
 }
+func GetOrders(db *mongo.Database) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		collection := db.Collection("orders")
 
+		cursor, err := collection.Find(c, bson.M{})
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Orders could not be fetched"})
+			return
+		}
+		defer cursor.Close(c)
+
+		var orders []models.Order
+		if err := cursor.All(c, &orders); err != nil {
+			c.JSON(500, gin.H{"error": "Failed to parse orders"})
+			return
+		}
+
+		c.JSON(200, orders)
+	}
+}
 func buildOrderFromRequest(req createOrderRequest) (models.Order, error) {
 	if len(req.Items) == 0 {
 		return models.Order{}, errors.New("at least one item is required")
