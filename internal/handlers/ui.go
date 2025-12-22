@@ -81,11 +81,43 @@ button.danger.ghost {
   justify-content: space-between;
   gap: 12px;
 }
+.order-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 .inline-actions { display: flex; gap: 8px; }
 .stacked-text { display: grid; gap: 4px; }
 .list { display: grid; gap: 6px; }
 .muted { color: #475569; font-size: 0.9rem; }
 .stacked { display: grid; gap: 10px; }
+.badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  background: #e2e8f0;
+  color: #0b2d66;
+}
+.badge.pending { background: #fef9c3; color: #854d0e; }
+.badge.completed { background: #dcfce7; color: #166534; }
+.badge.canceled { background: #fee2e2; color: #991b1b; }
+.order-items {
+  width: 100%;
+  border-collapse: collapse;
+}
+.order-items th, .order-items td {
+  padding: 6px;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+}
+.order-items th {
+  font-size: 0.9rem;
+  color: #475569;
+}
+.order-items .numeric { text-align: right; }
 hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
 </style>
 </head>
@@ -168,6 +200,12 @@ hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
     <button type="submit">Güncelle</button>
     <button type="button" id="deleteProduct" class="danger">Pasifleştir</button>
   </form>
+</section>
+
+<section>
+  <h2>Siparişler</h2>
+  <div id="ordersStatus" class="muted"></div>
+  <div id="ordersList" class="list"></div>
 </section>
 
 </main>
@@ -559,6 +597,126 @@ document.getElementById("deleteCategory").onclick = async function() {
   loadCategories();
 };
 
+/* ORDERS */
+function formatDateTime(value) {
+  const d = value ? new Date(value) : null;
+  if (!d || isNaN(d.getTime())) return "-";
+  return d.toLocaleString("tr-TR", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function formatCurrency(value) {
+  if (typeof value !== "number") return "-";
+  return value.toLocaleString("tr-TR", { style: "currency", currency: "TRY", minimumFractionDigits: 2 });
+}
+
+function statusBadgeClass(status) {
+  var normalized = (status || "").toLowerCase();
+  if (normalized === "completed") return "badge completed";
+  if (normalized === "canceled" || normalized === "cancelled") return "badge canceled";
+  return "badge pending";
+}
+
+function renderOrderItems(items) {
+  const table = document.createElement("table");
+  table.className = "order-items";
+
+  const thead = document.createElement("thead");
+  thead.innerHTML = "<tr><th>Ürün</th><th class='numeric'>Adet</th><th class='numeric'>Fiyat</th><th class='numeric'>Toplam</th></tr>";
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  (items || []).forEach(function(item) {
+    const tr = document.createElement("tr");
+    const lineTotal = (item && typeof item.price === "number" && typeof item.quantity === "number")
+      ? item.price * item.quantity
+      : null;
+
+    tr.innerHTML =
+      "<td>" + (item && item.name ? item.name : "-") + "</td>" +
+      "<td class='numeric'>" + (item && item.quantity != null ? item.quantity : "-") + "</td>" +
+      "<td class='numeric'>" + formatCurrency(item && typeof item.price === "number" ? item.price : null) + "</td>" +
+      "<td class='numeric'>" + formatCurrency(lineTotal) + "</td>";
+    tbody.appendChild(tr);
+  });
+
+  if (!items || items.length === 0) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = "<td colspan='4' class='muted'>Ürün bulunamadı</td>";
+    tbody.appendChild(tr);
+  }
+
+  table.appendChild(tbody);
+  return table;
+}
+
+function renderOrders(data) {
+  const el = document.getElementById("ordersList");
+  el.innerHTML = "";
+
+  if (!Array.isArray(data) || data.length === 0) {
+    el.innerHTML = "<div class='muted'>Sipariş yok</div>";
+    return;
+  }
+
+  data.forEach(function(order) {
+    const card = document.createElement("div");
+    card.className = "card";
+
+    const header = document.createElement("div");
+    header.className = "order-row clickable";
+    header.innerHTML =
+      "<div class='stacked-text'>" +
+        "<div><strong>Sipariş #" + (order && getId(order) ? getId(order) : "-") + "</strong></div>" +
+        "<div class='muted'>Oluşturma: " + formatDateTime(order && order.createdAt) + "</div>" +
+      "</div>" +
+      "<div class='stacked-text' style='text-align:right;'>" +
+        "<div><span class='" + statusBadgeClass(order && order.status) + "'>" + (order && order.status ? order.status : "Bilinmiyor") + "</span></div>" +
+        "<div class='muted'>" + (order && order.paymentMethod ? order.paymentMethod : "-") + "</div>" +
+        "<div><strong>" + formatCurrency(order && typeof order.totalPrice === "number" ? order.totalPrice : null) + "</strong></div>" +
+      "</div>";
+
+    const details = document.createElement("div");
+    details.className = "stacked";
+    details.style.display = "none";
+
+    const customer = order && order.customer ? order.customer : {};
+    const customerBox = document.createElement("div");
+    customerBox.className = "stacked-text";
+    customerBox.innerHTML =
+      "<div><strong>Müşteri</strong></div>" +
+      "<div>" + (customer.title || "-") + "</div>" +
+      "<div class='muted'>" + (customer.detail || "-") + "</div>" +
+      "<div class='muted'>" + (customer.note || "") + "</div>";
+
+    const itemsBox = document.createElement("div");
+    itemsBox.appendChild(renderOrderItems(order && order.items ? order.items : []));
+
+    details.appendChild(customerBox);
+    details.appendChild(itemsBox);
+
+    header.onclick = function() {
+      details.style.display = details.style.display === "none" ? "grid" : "none";
+    };
+
+    card.appendChild(header);
+    card.appendChild(details);
+    el.appendChild(card);
+  });
+}
+
+async function loadOrders() {
+  setText("ordersStatus", "Siparişler yükleniyor...");
+  const res = await fetch("/orders");
+  const payload = await safeJson(res);
+  if (!res.ok) {
+    setText("ordersStatus", "Hata: siparişler getirilemedi");
+    return;
+  }
+  const data = (payload && payload.data) ? payload.data : (payload || []);
+  renderOrders(data);
+  setText("ordersStatus", "");
+}
+
 /* PRODUCT CRUD (admin required) */
 document.getElementById("addProduct").onsubmit = async function(e) {
   e.preventDefault();
@@ -627,6 +785,7 @@ document.getElementById("deleteProduct").onclick = async function() {
 /* initial load (public) */
 loadCategories();
 loadProducts();
+loadOrders();
 </script>
 
 </body>
