@@ -92,6 +92,7 @@ button.danger.ghost {
 .list { display: grid; gap: 6px; }
 .muted { color: #475569; font-size: 0.9rem; }
 .stacked { display: grid; gap: 10px; }
+.stacked.labels { gap: 4px; }
 .badge {
   display: inline-block;
   padding: 4px 8px;
@@ -118,6 +119,19 @@ button.danger.ghost {
   color: #475569;
 }
 .order-items .numeric { text-align: right; }
+.address-block {
+  display: grid;
+  gap: 2px;
+}
+.address-label {
+  font-weight: 600;
+}
+.order-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
 hr { border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0; }
 </style>
 </head>
@@ -597,11 +611,13 @@ document.getElementById("deleteCategory").onclick = async function() {
   loadCategories();
 };
 
-/* ORDERS */
+// --- ORDERS UI START ---
+const ORDER_API_URL = "http://52.57.82.30/orders";
+
 function formatDateTime(value) {
   const d = value ? new Date(value) : null;
   if (!d || isNaN(d.getTime())) return "-";
-  return d.toLocaleString("tr-TR", { dateStyle: "medium", timeStyle: "short" });
+  return d.toLocaleString("tr-TR");
 }
 
 function formatCurrency(value) {
@@ -621,7 +637,7 @@ function renderOrderItems(items) {
   table.className = "order-items";
 
   const thead = document.createElement("thead");
-  thead.innerHTML = "<tr><th>Ürün</th><th class='numeric'>Adet</th><th class='numeric'>Fiyat</th><th class='numeric'>Toplam</th></tr>";
+  thead.innerHTML = "<tr><th>Ürün</th><th class='numeric'>Adet</th><th class='numeric'>Birim</th><th class='numeric'>Satır</th></tr>";
   table.appendChild(thead);
 
   const tbody = document.createElement("tbody");
@@ -669,7 +685,7 @@ function renderOrders(data) {
         "<div><strong>Sipariş #" + (order && getId(order) ? getId(order) : "-") + "</strong></div>" +
         "<div class='muted'>Oluşturma: " + formatDateTime(order && order.createdAt) + "</div>" +
       "</div>" +
-      "<div class='stacked-text' style='text-align:right;'>" +
+      "<div class='order-summary'>" +
         "<div><span class='" + statusBadgeClass(order && order.status) + "'>" + (order && order.status ? order.status : "Bilinmiyor") + "</span></div>" +
         "<div class='muted'>" + (order && order.paymentMethod ? order.paymentMethod : "-") + "</div>" +
         "<div><strong>" + formatCurrency(order && typeof order.totalPrice === "number" ? order.totalPrice : null) + "</strong></div>" +
@@ -681,18 +697,24 @@ function renderOrders(data) {
 
     const customer = order && order.customer ? order.customer : {};
     const customerBox = document.createElement("div");
-    customerBox.className = "stacked-text";
+    customerBox.className = "stacked labels";
     customerBox.innerHTML =
-      "<div><strong>Müşteri</strong></div>" +
+      "<div class='address-label'>Başlık:</div>" +
       "<div>" + (customer.title || "-") + "</div>" +
-      "<div class='muted'>" + (customer.detail || "-") + "</div>" +
-      "<div class='muted'>" + (customer.note || "") + "</div>";
+      "<div class='address-label'>Adres:</div>" +
+      "<div class='address-block'>" + (customer.detail || "-").split("\n").join("<br>") + "</div>" +
+      (customer.note ? ("<div class='address-label'>Not:</div><div>" + customer.note + "</div>") : "");
 
     const itemsBox = document.createElement("div");
     itemsBox.appendChild(renderOrderItems(order && order.items ? order.items : []));
 
+    const totalLine = document.createElement("div");
+    totalLine.style.textAlign = "right";
+    totalLine.innerHTML = "<strong>Toplam: " + formatCurrency(order && typeof order.totalPrice === "number" ? order.totalPrice : null) + "</strong>";
+
     details.appendChild(customerBox);
     details.appendChild(itemsBox);
+    details.appendChild(totalLine);
 
     header.onclick = function() {
       details.style.display = details.style.display === "none" ? "grid" : "none";
@@ -706,7 +728,7 @@ function renderOrders(data) {
 
 async function loadOrders() {
   setText("ordersStatus", "Siparişler yükleniyor...");
-  const res = await fetch("/orders");
+  const res = await fetch(ORDER_API_URL);
   const payload = await safeJson(res);
   if (!res.ok) {
     setText("ordersStatus", "Hata: siparişler getirilemedi");
@@ -716,6 +738,7 @@ async function loadOrders() {
   renderOrders(data);
   setText("ordersStatus", "");
 }
+// --- ORDERS UI END ---
 
 /* PRODUCT CRUD (admin required) */
 document.getElementById("addProduct").onsubmit = async function(e) {
