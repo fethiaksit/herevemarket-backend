@@ -107,6 +107,23 @@ button.danger.ghost {
   justify-content: space-between;
   gap: 12px;
 }
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.table th,
+.table td {
+  padding: 8px;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: middle;
+  text-align: left;
+}
+.table .product-row:hover {
+  background: #f8fafc;
+}
+.table .inline-actions {
+  justify-content: flex-end;
+}
 .order-row {
   display: flex;
   align-items: center;
