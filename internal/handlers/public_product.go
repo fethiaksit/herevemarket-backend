@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -73,51 +75,81 @@ func GetProducts(db *mongo.Database) gin.HandlerFunc {
 }
 func GetCampaignProducts(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		page, limit, err := parsePaginationParams(c.Query("page"), c.Query("limit"))
+		const route = "GET /products/campaign"
+		defer handlePanic(c, route)
+
+		if err := ensureDBConnection(c.Request.Context(), db); err != nil {
+			respondWithError(c, http.StatusServiceUnavailable, route, "database unavailable")
+			return
+		}
+
+		limit := parseCampaignLimit(c.Query("limit"))
+		sortBy, err := parseCampaignSort(c.Query("sort"))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			respondWithError(c, http.StatusBadRequest, route, "invalid sort value")
 			return
 		}
 
 		filter := bson.M{
 			"isActive":   true,
 			"isCampaign": true,
-			"isDeleted":  bson.M{"$ne": true},
 		}
 
 		findOptions := options.Find().
-			SetSkip((page - 1) * limit).
 			SetLimit(limit).
-			SetSort(bson.D{{Key: "createdAt", Value: -1}})
+			SetSort(sortBy)
 
-		ctx := context.Background()
-
-		total, err := db.Collection("products").CountDocuments(ctx, filter)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
-			return
-		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer cancel()
 
 		cursor, err := db.Collection("products").Find(ctx, filter, findOptions)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+			respondWithError(c, http.StatusInternalServerError, route, "db error")
 			return
 		}
 		defer cursor.Close(ctx)
 
 		products, err := decodeProducts(ctx, cursor)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "decode error"})
+			respondWithError(c, http.StatusInternalServerError, route, "decode error")
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"data": products,
-			"pagination": gin.H{
-				"page":  page,
-				"limit": limit,
-				"total": total,
-			},
-		})
+		c.JSON(http.StatusOK, products)
+	}
+}
+
+func parseCampaignLimit(rawLimit string) int64 {
+	const (
+		defaultLimit = int64(12)
+		maxLimit     = int64(30)
+	)
+
+	if rawLimit == "" {
+		return defaultLimit
+	}
+
+	limit, err := strconv.ParseInt(rawLimit, 10, 64)
+	if err != nil || limit <= 0 {
+		return defaultLimit
+	}
+	if limit > maxLimit {
+		return maxLimit
+	}
+	return limit
+}
+
+func parseCampaignSort(rawSort string) (bson.D, error) {
+	sortValue := strings.TrimSpace(rawSort)
+	if sortValue == "" || sortValue == "newest" {
+		return bson.D{{Key: "createdAt", Value: -1}}, nil
+	}
+	switch sortValue {
+	case "price_asc":
+		return bson.D{{Key: "price", Value: 1}}, nil
+	case "price_desc":
+		return bson.D{{Key: "price", Value: -1}}, nil
+	default:
+		return bson.D{}, fmt.Errorf("invalid sort: %s", sortValue)
 	}
 }
