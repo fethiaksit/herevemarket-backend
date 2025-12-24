@@ -73,6 +73,8 @@ func main() {
 		admin.POST("/categories", handlers.CreateCategory(db))
 		admin.PUT("/categories/:id", handlers.UpdateCategory(db))
 		admin.DELETE("/categories/:id", handlers.DeleteCategory(db))
+
+		admin.DELETE("/orders/:id", handlers.DeleteOrder(db))
 	}
 	port := os.Getenv("PORT")
 	if port == "" {
