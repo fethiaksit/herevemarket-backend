@@ -1,38 +1,50 @@
 const TOKEN_KEY = "admin_token";
 
+/* ---------------- TOKEN ---------------- */
+
 function getToken() {
-  return localStorage.getItem(TOKEN_KEY) || "";
+  return localStorage.getItem(TOKEN_KEY);
 }
 
 function setToken(token) {
-  if (token) {
-    localStorage.setItem(TOKEN_KEY, token);
-  }
+  if (token) localStorage.setItem(TOKEN_KEY, token);
 }
 
 function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+/* ---------------- REDIRECT ---------------- */
+
 function redirectToLogin() {
-  window.location.href = "/admin/login";
+  window.location.replace("/admin/login");
 }
 
 function redirectToCategories() {
-  window.location.href = "/admin/categories";
+  window.location.replace("/admin/categories");
 }
 
+/* ---------------- AUTH GUARDS ---------------- */
+
+// SADECE login.html'de çağrılacak
+function redirectIfAuthenticated() {
+  const token = getToken();
+  if (!token) return;
+
+  if (window.location.pathname === "/admin/login") {
+    redirectToCategories();
+  }
+}
+
+// SADECE admin sayfalarında çağrılacak
 function requireAuth() {
-  if (!getToken()) {
+  const token = getToken();
+  if (!token) {
     redirectToLogin();
   }
 }
 
-function redirectIfAuthenticated() {
-  if (getToken()) {
-    redirectToCategories();
-  }
-}
+/* ---------------- HELPERS ---------------- */
 
 function authHeaders() {
   return {
@@ -62,6 +74,8 @@ function handleUnauthorized(res) {
   return false;
 }
 
+/* ---------------- UI ---------------- */
+
 function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.innerText = text || "";
@@ -73,10 +87,8 @@ function logout() {
 }
 
 function bindLogout() {
-  const logoutBtn = document.getElementById("logoutButton");
-  if (logoutBtn) {
-    logoutBtn.addEventListener("click", logout);
-  }
+  const btn = document.getElementById("logoutButton");
+  if (btn) btn.addEventListener("click", logout);
 }
 
 document.addEventListener("DOMContentLoaded", bindLogout);
