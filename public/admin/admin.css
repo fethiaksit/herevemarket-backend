@@ -193,6 +193,25 @@ button.danger.ghost {
   color: #475569;
   background: #f8fafc;
 }
+.orders-table tbody tr.order-row {
+  cursor: pointer;
+  transition: background 0.2s ease-in-out;
+}
+.orders-table tbody tr.order-row:hover {
+  background: #f1f5f9;
+}
+.orders-table tbody tr.order-row.is-expanded {
+  background: #e2e8f0;
+}
+.order-detail-row td {
+  background: #f8fafc;
+}
+.order-detail-content {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 .orders-table td.numeric,
 .orders-table th.numeric {
   text-align: right;
