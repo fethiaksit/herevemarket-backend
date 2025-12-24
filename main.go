@@ -25,8 +25,14 @@ func main() {
 	log.Println("MongoDB connected to:", db.Name())
 
 	r := gin.Default()
+	r.LoadHTMLGlob("templates/**/*")
+	r.Static("/public", "./public")
 
 	r.GET("/", handlers.Home())
+	r.GET("/admin/login", handlers.AdminLoginPage)
+	r.GET("/admin/categories", handlers.AdminCategoriesPage)
+	r.GET("/admin/products", handlers.AdminProductsPage)
+	r.GET("/admin/orders", handlers.AdminOrdersPage)
 
 	r.POST("/auth/register", handlers.Register(db))
 	r.POST("/auth/login", handlers.Login(
@@ -51,7 +57,7 @@ func main() {
 	r.POST("/orders", handlers.CreateOrder(db))
 	r.GET("/orders", handlers.GetOrders(db))
 
-	admin := r.Group("/admin")
+	admin := r.Group("/admin/api")
 	admin.Use(middleware.AdminAuth(config.AppEnv.JWTSecret))
 	{
 		admin.GET("/me", func(c *gin.Context) {

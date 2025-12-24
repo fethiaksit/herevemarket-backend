@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hereve Market Admin Login</title>
+  <link rel="stylesheet" href="/public/admin/admin.css">
+</head>
+<body>
+<header>
+  <div class="header-content">
+    <h1>Hereve Market – Admin Panel</h1>
+  </div>
+</header>
+<main>
+  <section>
+    <h2 class="page-title">Admin Login</h2>
+    <form id="loginForm">
+      <label>Email</label>
+      <input name="email" value="admin@market.com">
+      <label>Password</label>
+      <input name="password" type="password" value="123456">
+      <button type="submit">Login</button>
+    </form>
+    <div id="loginStatus" class="muted"></div>
+  </section>
+</main>
+<script src="/public/admin/admin.js"></script>
+<script>
+  redirectIfAuthenticated();
+
+  document.getElementById("loginForm").addEventListener("submit", async function(event) {
+    event.preventDefault();
+    setText("loginStatus", "Giriş yapılıyor...");
+
+    const form = new FormData(event.target);
+    const res = await fetch("/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: form.get("email"),
+        password: form.get("password")
+      })
+    });
+
+    const payload = await safeJson(res);
+    if (!res.ok || !payload || !payload.token) {
+      setText("loginStatus", "Hata: " + JSON.stringify(payload));
+      return;
+    }
+
+    setToken(payload.token);
+    redirectToCategories();
+  });
+</script>
+</body>
+</html>
