@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hereve Market Admin - Siparişler</title>
+  <link rel="stylesheet" href="/public/admin/admin.css">
+</head>
+<body>
+<header>
+  <div class="header-content">
+    <h1>Hereve Market – Admin Panel</h1>
+    <nav>
+      <a href="/admin/categories">Kategoriler</a>
+      <a href="/admin/products">Ürünler</a>
+      <a class="active" href="/admin/orders">Siparişler</a>
+      <button type="button" id="logoutButton">Çıkış</button>
+    </nav>
+  </div>
+</header>
+<main>
+  <section>
+    <h2 class="page-title">Siparişler</h2>
+    <div id="ordersStatus" class="muted"></div>
+    <div id="ordersList" class="list"></div>
+  </section>
+</main>
+<script src="/public/admin/admin.js"></script>
+<script>
+  requireAuth();
+
+  const ORDER_API_URL = "https://api.herevemarket.com/orders";
+
+  function formatDateTime(value) {
+    const date = value ? new Date(value) : null;
+    if (!date || isNaN(date.getTime())) return "-";
+    return date.toLocaleString("tr-TR");
+  }
+
+  function formatCurrency(value) {
+    if (typeof value !== "number") return "-";
+    return value.toLocaleString("tr-TR", { style: "currency", currency: "TRY", minimumFractionDigits: 2 });
+  }
+
+  function statusBadgeClass(status) {
+    const normalized = (status || "").toLowerCase();
+    if (normalized === "completed") return "badge completed";
+    if (normalized === "canceled" || normalized === "cancelled") return "badge canceled";
+    return "badge pending";
+  }
+
+  function renderOrderItems(items) {
+    const table = document.createElement("table");
+    table.className = "order-items";
+
+    const thead = document.createElement("thead");
+    thead.innerHTML = "<tr><th>Ürün</th><th class='numeric'>Adet</th><th class='numeric'>Birim</th><th class='numeric'>Satır</th></tr>";
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    (items || []).forEach(function(item) {
+      const tr = document.createElement("tr");
+      const lineTotal = (item && typeof item.price === "number" && typeof item.quantity === "number")
+        ? item.price * item.quantity
+        : null;
+
+      tr.innerHTML =
+        "<td>" + (item && item.name ? item.name : "-") + "</td>" +
+        "<td class='numeric'>" + (item && item.quantity != null ? item.quantity : "-") + "</td>" +
+        "<td class='numeric'>" + formatCurrency(item && typeof item.price === "number" ? item.price : null) + "</td>" +
+        "<td class='numeric'>" + formatCurrency(lineTotal) + "</td>";
+      tbody.appendChild(tr);
+    });
+
+    if (!items || items.length === 0) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = "<td colspan='4' class='muted'>Ürün bulunamadı</td>";
+      tbody.appendChild(tr);
+    }
+
+    table.appendChild(tbody);
+    return table;
+  }
+
+  function renderOrders(data) {
+    const el = document.getElementById("ordersList");
+    el.innerHTML = "";
+
+    if (!Array.isArray(data) || data.length === 0) {
+      el.innerHTML = "<div class='muted'>Sipariş yok</div>";
+      return;
+    }
+
+    data.forEach(function(order) {
+      const card = document.createElement("div");
+      card.className = "card";
+
+      const header = document.createElement("div");
+      header.className = "order-row clickable";
+      header.innerHTML =
+        "<div class='stacked-text'>" +
+          "<div><strong>Sipariş #" + (order && getId(order) ? getId(order) : "-") + "</strong></div>" +
+          "<div class='muted'>Oluşturma: " + formatDateTime(order && order.createdAt) + "</div>" +
+        "</div>" +
+        "<div class='order-summary'>" +
+          "<div><span class='" + statusBadgeClass(order && order.status) + "'>" + (order && order.status ? order.status : "Bilinmiyor") + "</span></div>" +
+          "<div class='muted'>" + (order && order.paymentMethod ? order.paymentMethod : "-") + "</div>" +
+          "<div><strong>" + formatCurrency(order && typeof order.totalPrice === "number" ? order.totalPrice : null) + "</strong></div>" +
+        "</div>";
+
+      const details = document.createElement("div");
+      details.className = "stacked";
+      details.style.display = "none";
+
+      const customer = order && order.customer ? order.customer : {};
+      const customerBox = document.createElement("div");
+      customerBox.className = "stacked labels";
+      customerBox.innerHTML =
+        "<div class='address-label'>Başlık:</div>" +
+        "<div>" + (customer.title || "-") + "</div>" +
+        "<div class='address-label'>Adres:</div>" +
+        "<div class='address-block'>" + (customer.detail || "-").split("\n").join("<br>") + "</div>" +
+        (customer.note ? ("<div class='address-label'>Not:</div><div>" + customer.note + "</div>") : "");
+
+      const itemsBox = document.createElement("div");
+      itemsBox.appendChild(renderOrderItems(order && order.items ? order.items : []));
+
+      const totalLine = document.createElement("div");
+      totalLine.style.textAlign = "right";
+      totalLine.innerHTML = "<strong>Toplam: " + formatCurrency(order && typeof order.totalPrice === "number" ? order.totalPrice : null) + "</strong>";
+
+      details.appendChild(customerBox);
+      details.appendChild(itemsBox);
+      details.appendChild(totalLine);
+
+      header.onclick = function() {
+        details.style.display = details.style.display === "none" ? "grid" : "none";
+      };
+
+      card.appendChild(header);
+      card.appendChild(details);
+      el.appendChild(card);
+    });
+  }
+
+  async function loadOrders() {
+    setText("ordersStatus", "Siparişler yükleniyor...");
+    const res = await fetch(ORDER_API_URL, { headers: authHeaders() });
+    if (handleUnauthorized(res)) return;
+    const payload = await safeJson(res);
+    if (!res.ok) {
+      setText("ordersStatus", "Hata: siparişler getirilemedi");
+      return;
+    }
+    const data = (payload && payload.data) ? payload.data : (payload || []);
+    renderOrders(data);
+    setText("ordersStatus", "");
+  }
+
+  loadOrders();
+</script>
+</body>
+</html>
