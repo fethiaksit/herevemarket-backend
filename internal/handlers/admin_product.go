@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -191,8 +192,27 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
+		body, err := c.GetRawData()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+
+		var raw map[string]interface{}
+		if err := json.Unmarshal(body, &raw); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+
+		if val, ok := raw["isCampaign"]; ok {
+			if _, ok := val.(bool); !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "isCampaign must be boolean"})
+				return
+			}
+		}
+
 		var req ProductUpdateRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
+		if err := json.Unmarshal(body, &req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 			return
 		}
