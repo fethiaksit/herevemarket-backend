@@ -3,10 +3,13 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -47,7 +50,7 @@ type createOrderRequest struct {
    CREATE ORDER
 ========================= */
 
-func CreateOrder(db *mongo.Database) gin.HandlerFunc {
+func CreateOrder(db *mongo.Database, jwtSecret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		const route = "POST /orders"
 		defer handlePanic(c, route)
@@ -63,11 +66,19 @@ func CreateOrder(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
+		userID, err := userIDFromHeader(c.GetHeader("Authorization"), jwtSecret)
+		if err != nil {
+			log.Println("[ORDER] [ERROR] token validation failed:", err)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+
 		order, err := buildOrderFromRequest(req)
 		if err != nil {
 			respondWithError(c, http.StatusBadRequest, route, err.Error())
 			return
 		}
+		order.UserID = userID
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
@@ -161,6 +172,12 @@ func CreateOrder(db *mongo.Database) gin.HandlerFunc {
 			order.ID = orderID
 		}
 
+		if userID != nil {
+			log.Println("[ORDER] [INFO] order created for user:", userID.Hex())
+		} else {
+			log.Println("[ORDER] [INFO] guest order created")
+		}
+
 		c.JSON(http.StatusCreated, gin.H{
 			"orderId": order.ID.Hex(),
 			"message": "order created",
@@ -243,6 +260,42 @@ func buildOrderFromRequest(req createOrderRequest) (models.Order, error) {
 	}
 
 	return order, nil
+}
+
+func userIDFromHeader(header, secret string) (*primitive.ObjectID, error) {
+	raw := strings.TrimSpace(header)
+	if raw == "" {
+		return nil, nil
+	}
+
+	parts := strings.Split(raw, " ")
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return nil, errors.New("invalid token format")
+	}
+
+	token, err := jwt.Parse(parts[1], func(t *jwt.Token) (interface{}, error) {
+		return []byte(secret), nil
+	})
+	if err != nil || !token.Valid {
+		return nil, errors.New("invalid token")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, errors.New("invalid token claims")
+	}
+
+	userIDValue, ok := claims["userId"].(string)
+	if !ok || strings.TrimSpace(userIDValue) == "" {
+		return nil, errors.New("userId claim missing")
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDValue)
+	if err != nil {
+		return nil, errors.New("invalid userId")
+	}
+
+	return &userID, nil
 }
 
 type outOfStockError struct {
