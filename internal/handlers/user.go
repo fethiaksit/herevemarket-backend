@@ -129,7 +129,7 @@ func CreateUserAddress(db *mongo.Database) gin.HandlerFunc {
 		user.Addresses = append(user.Addresses, address)
 		user.UpdatedAt = time.Now()
 
-		_, err := db.Collection("users").UpdateByID(ctx, userID, bson.M{
+		_, err = db.Collection("users").UpdateByID(ctx, userID, bson.M{
 			"$set": bson.M{
 				"addresses": user.Addresses,
 				"updatedAt": user.UpdatedAt,
