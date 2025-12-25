@@ -11,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"backend/internal/models"
 )
@@ -73,14 +74,62 @@ func CreateOrder(db *mongo.Database) gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
 
-		res, err := db.Collection("orders").InsertOne(ctx, order)
+		session, err := db.Client().StartSession()
 		if err != nil {
 			respondWithError(c, http.StatusInternalServerError, route, "db error")
 			return
 		}
+		defer session.EndSession(ctx)
 
-		if id, ok := res.InsertedID.(primitive.ObjectID); ok {
-			order.ID = id
+		var orderID primitive.ObjectID
+		_, err = session.WithTransaction(ctx, func(sessCtx mongo.SessionContext) (interface{}, error) {
+			for _, item := range order.Items {
+				filter := bson.M{
+					"_id":       item.ProductID,
+					"isDeleted": bson.M{"$ne": true},
+					"stock":     bson.M{"$gte": item.Quantity},
+				}
+				update := bson.M{"$inc": bson.M{"stock": -item.Quantity}}
+
+				res := db.Collection("products").FindOneAndUpdate(
+					sessCtx,
+					filter,
+					update,
+					options.FindOneAndUpdate().SetReturnDocument(options.After),
+				)
+
+				if res.Err() == mongo.ErrNoDocuments {
+					return nil, outOfStockError{ProductID: item.ProductID}
+				}
+				if res.Err() != nil {
+					return nil, res.Err()
+				}
+			}
+
+			res, err := db.Collection("orders").InsertOne(sessCtx, order)
+			if err != nil {
+				return nil, err
+			}
+			if id, ok := res.InsertedID.(primitive.ObjectID); ok {
+				orderID = id
+			}
+			return nil, nil
+		})
+		if err != nil {
+			var stockErr outOfStockError
+			if errors.As(err, &stockErr) {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":     "Ürün stokta yok",
+					"productId": stockErr.ProductID.Hex(),
+				})
+				return
+			}
+			respondWithError(c, http.StatusInternalServerError, route, "db error")
+			return
+		}
+
+		if !orderID.IsZero() {
+			order.ID = orderID
 		}
 
 		c.JSON(http.StatusCreated, gin.H{
@@ -166,4 +215,12 @@ func buildOrderFromRequest(req createOrderRequest) (models.Order, error) {
 	}
 
 	return order, nil
+}
+
+type outOfStockError struct {
+	ProductID primitive.ObjectID
+}
+
+func (e outOfStockError) Error() string {
+	return "product out of stock"
 }
