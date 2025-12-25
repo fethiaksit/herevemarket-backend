@@ -23,7 +23,6 @@ func EnsureProductIndexes(db *mongo.Database) error {
 			SetPartialFilterExpression(bson.M{
 				"barcode": bson.M{
 					"$exists": true,
-					"$ne":     "",
 				},
 			}),
 	}
