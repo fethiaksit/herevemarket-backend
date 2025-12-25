@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -27,7 +28,7 @@ type ProductCreateRequest struct {
 	ImageURL   string   `json:"imageUrl" binding:"required"`
 	Barcode    string   `json:"barcode"`
 	Brand      string   `json:"brand"`
-	Stock      *int     `json:"stock" binding:"required"`
+	Stock      *int     `json:"stock"`
 	IsActive   *bool    `json:"isActive"`
 	IsCampaign *bool    `json:"isCampaign"`
 }
@@ -142,7 +143,8 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req ProductCreateRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			log.Printf("CreateProduct bind error: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -221,12 +223,14 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 
 		body, err := c.GetRawData()
 		if err != nil {
+			log.Printf("UpdateProduct read body error: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 			return
 		}
 
 		var raw map[string]interface{}
 		if err := json.Unmarshal(body, &raw); err != nil {
+			log.Printf("UpdateProduct raw json error: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 			return
 		}
@@ -240,17 +244,19 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 
 		var req ProductUpdateRequest
 		if err := json.Unmarshal(body, &req); err != nil {
+			log.Printf("UpdateProduct bind error: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 			return
 		}
 
-		update := bson.M{}
+		updateSet := bson.M{}
+		updateUnset := bson.M{}
 
 		if req.Name != nil {
-			update["name"] = *req.Name
+			updateSet["name"] = *req.Name
 		}
 		if req.Price != nil {
-			update["price"] = *req.Price
+			updateSet["price"] = *req.Price
 		}
 		if req.Category != nil {
 			cats := normalizeCategories(*req.Category)
@@ -259,35 +265,48 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 				return
 			}
 
-			update["category"] = cats
+			updateSet["category"] = models.StringList(cats)
 
 		}
 		if req.ImageURL != nil {
-			update["imageUrl"] = *req.ImageURL
+			updateSet["imageUrl"] = *req.ImageURL
 		}
 		if req.Barcode != nil {
-			update["barcode"] = strings.TrimSpace(*req.Barcode)
+			barcode := strings.TrimSpace(*req.Barcode)
+			if barcode == "" {
+				updateUnset["barcode"] = ""
+			} else {
+				updateSet["barcode"] = barcode
+			}
 		}
 		if req.Brand != nil {
-			update["brand"] = strings.TrimSpace(*req.Brand)
+			updateSet["brand"] = strings.TrimSpace(*req.Brand)
 		}
 		if req.Stock != nil {
 			if *req.Stock < 0 {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "stock must be zero or greater"})
 				return
 			}
-			update["stock"] = *req.Stock
+			updateSet["stock"] = *req.Stock
 		}
 		if req.IsActive != nil {
-			update["isActive"] = *req.IsActive
+			updateSet["isActive"] = *req.IsActive
 		}
 		if req.IsCampaign != nil {
-			update["isCampaign"] = *req.IsCampaign
+			updateSet["isCampaign"] = *req.IsCampaign
 		}
 
-		if len(update) == 0 {
+		if len(updateSet) == 0 && len(updateUnset) == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "no fields to update"})
 			return
+		}
+
+		update := bson.M{}
+		if len(updateSet) > 0 {
+			update["$set"] = updateSet
+		}
+		if len(updateUnset) > 0 {
+			update["$unset"] = updateUnset
 		}
 
 		var updated models.Product
@@ -297,7 +316,7 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 				"_id":       id,
 				"isDeleted": bson.M{"$ne": true},
 			},
-			bson.M{"$set": update},
+			update,
 			options.FindOneAndUpdate().SetReturnDocument(options.After),
 		).Decode(&updated)
 
