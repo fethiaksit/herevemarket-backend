@@ -33,6 +33,10 @@
       <form id="addProduct">
         <input name="name" placeholder="Ürün adı">
         <input name="price" placeholder="Fiyat (örn: 24.90)">
+        <input name="brand" placeholder="Marka">
+        <input name="barcode" placeholder="Barkod">
+        <input name="stock" type="number" min="0" step="1" placeholder="Stok">
+        <label><input type="checkbox" name="isCampaign"> Kampanya</label>
         <select name="category" id="addProductCategorySelect" class="product-category-select" multiple>
           <option value="">Kategori Seç</option>
         </select>
@@ -52,8 +56,15 @@
         <select name="category" id="editProductCategorySelect" class="product-category-select" multiple>
           <option value="">Kategori Seç</option>
         </select>
+        <label>Marka</label>
+        <input name="brand" placeholder="Marka">
+        <label>Barkod</label>
+        <input name="barcode" placeholder="Barkod">
+        <label>Stok</label>
+        <input name="stock" type="number" min="0" step="1" placeholder="Stok">
         <label>Görsel URL</label>
         <input name="imageUrl" placeholder="Görsel URL">
+        <label><input type="checkbox" name="isCampaign"> Kampanya</label>
         <label><input type="checkbox" name="isActive"> Aktif</label>
         <button type="submit">Güncelle</button>
         <button type="button" id="deleteProduct" class="danger">Pasifleştir</button>
@@ -67,6 +78,9 @@
       <thead>
         <tr>
           <th>Ürün</th>
+          <th>Marka</th>
+          <th>Barkod</th>
+          <th>Stok</th>
           <th>Kampanya</th>
           <th>İşlemler</th>
         </tr>
