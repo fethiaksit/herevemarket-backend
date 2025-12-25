@@ -43,6 +43,11 @@ function normalizeBrand(value) {
   return String(value).trim();
 }
 
+function normalizeDescription(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
 // ✅ DÜZELTME 1: targetSelect parametresi eklendi. Sadece istenen kutuyu günceller.
 async function populateProductCategorySelects(selectedValues, preloadedCategories, targetSelect) {
   const desiredSelection = normalizeCategoryValues(selectedValues);
@@ -435,6 +440,7 @@ async function selectProduct(product) {
   form.elements.barcode.value = product.barcode || "";
   form.elements.stock.value = (product.stock ?? "");
   form.elements.imageUrl.value = product.imageUrl || "";
+  form.elements.description.value = product.description || "";
   form.elements.isCampaign.checked = !!product.isCampaign;
   form.elements.isActive.checked = !!product.isActive;
 }
@@ -506,6 +512,7 @@ document.getElementById("addProduct").addEventListener("submit", async function(
     price: price,
     brand: form.get("brand"),
     barcode: barcode,
+    description: normalizeDescription(form.get("description")),
     stock: stock,
     category: categories,
     imageUrl: form.get("imageUrl"),
@@ -568,6 +575,7 @@ document.getElementById("editProduct").addEventListener("submit", async function
     price: price,
     brand: form.get("brand"),
     barcode: barcode,
+    description: normalizeDescription(form.get("description")),
     stock: stock,
     category: categories,
     imageUrl: form.get("imageUrl"),
