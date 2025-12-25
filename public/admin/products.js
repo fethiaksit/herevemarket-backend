@@ -139,6 +139,7 @@ async function toggleCampaign(checkbox) {
   checkbox.disabled = true;
 
   try {
+    console.log("Toggle campaign payload:", { isCampaign: checked });
     const res = await fetch("/admin/api/products/" + id, {
       method: "PUT",
       headers: authHeaders(),
@@ -146,6 +147,10 @@ async function toggleCampaign(checkbox) {
         isCampaign: checked
       })
     });
+
+    console.log("Toggle campaign response status:", res.status);
+    const responseBody = await safeJson(res);
+    console.log("Toggle campaign response body:", responseBody);
 
     if (handleUnauthorized(res)) {
       checkbox.checked = !checked;
@@ -155,6 +160,7 @@ async function toggleCampaign(checkbox) {
 
     if (!res.ok) {
       checkbox.checked = !checked;
+      console.error("Toggle campaign failed:", responseBody || res.statusText);
       alert("Kampanya güncellenemedi");
       return;
     }
@@ -197,6 +203,7 @@ async function handleQuickSaveProduct(product, fields) {
   fields.saveButton.textContent = "Kaydediliyor...";
 
   try {
+    console.log("Quick save payload:", payload);
     const res = await fetch("/admin/api/products/" + id, {
       method: "PUT",
       headers: authHeaders(),
@@ -205,8 +212,11 @@ async function handleQuickSaveProduct(product, fields) {
 
     if (handleUnauthorized(res)) return;
 
+    console.log("Quick save response status:", res.status);
     const data = await safeJson(res);
+    console.log("Quick save response body:", data);
     if (!res.ok) {
+      console.error("Quick save failed:", data || res.statusText);
       alert("Güncelleme başarısız: " + ((data && data.error) ? data.error : res.statusText));
       fields.saveButton.textContent = originalText;
       return;
@@ -491,22 +501,31 @@ document.getElementById("addProduct").addEventListener("submit", async function(
 
   const barcode = normalizeBarcode(form.get("barcode"));
 
+  const createPayload = {
+    name: form.get("name"),
+    price: price,
+    brand: form.get("brand"),
+    barcode: barcode,
+    stock: stock,
+    category: categories,
+    imageUrl: form.get("imageUrl"),
+    isCampaign: form.get("isCampaign") === "on",
+    isActive: true
+  };
+
+  console.log("Create product payload:", createPayload);
+
   const res = await fetch("/admin/api/products", {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({
-      name: form.get("name"),
-      price: price,
-      brand: form.get("brand"),
-      barcode: barcode,
-      stock: stock,
-      category: categories,
-      imageUrl: form.get("imageUrl"),
-      isCampaign: form.get("isCampaign") === "on",
-      isActive: true
-    })
+    body: JSON.stringify(createPayload)
   });
-
+  console.log("Create product response status:", res.status);
+  const createBody = await safeJson(res);
+  console.log("Create product response body:", createBody);
+  if (!res.ok) {
+    console.error("Create product failed:", createBody || res.statusText);
+  }
   if (handleUnauthorized(res)) return;
 
   event.target.reset();
@@ -544,22 +563,31 @@ document.getElementById("editProduct").addEventListener("submit", async function
 
   const barcode = normalizeBarcode(form.get("barcode"));
 
+  const updatePayload = {
+    name: form.get("name"),
+    price: price,
+    brand: form.get("brand"),
+    barcode: barcode,
+    stock: stock,
+    category: categories,
+    imageUrl: form.get("imageUrl"),
+    isCampaign: form.get("isCampaign") === "on",
+    isActive: form.get("isActive") === "on"
+  };
+
+  console.log("Update product payload:", updatePayload);
+
   const res = await fetch("/admin/api/products/" + id, {
     method: "PUT",
     headers: authHeaders(),
-    body: JSON.stringify({
-      name: form.get("name"),
-      price: price,
-      brand: form.get("brand"),
-      barcode: barcode,
-      stock: stock,
-      category: categories,
-      imageUrl: form.get("imageUrl"),
-      isCampaign: form.get("isCampaign") === "on",
-      isActive: form.get("isActive") === "on"
-    })
+    body: JSON.stringify(updatePayload)
   });
-
+  console.log("Update product response status:", res.status);
+  const updateBody = await safeJson(res);
+  console.log("Update product response body:", updateBody);
+  if (!res.ok) {
+    console.error("Update product failed:", updateBody || res.statusText);
+  }
   if (handleUnauthorized(res)) return;
 
   loadProducts();
