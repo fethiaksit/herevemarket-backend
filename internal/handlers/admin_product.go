@@ -25,6 +25,9 @@ type ProductCreateRequest struct {
 	Price      float64  `json:"price" binding:"required"`
 	Category   []string `json:"category" binding:"required"`
 	ImageURL   string   `json:"imageUrl" binding:"required"`
+	Barcode    string   `json:"barcode"`
+	Brand      string   `json:"brand"`
+	Stock      *int     `json:"stock" binding:"required"`
 	IsActive   *bool    `json:"isActive"`
 	IsCampaign *bool    `json:"isCampaign"`
 }
@@ -34,6 +37,9 @@ type ProductUpdateRequest struct {
 	Price      *float64  `json:"price"`
 	Category   *[]string `json:"category"`
 	ImageURL   *string   `json:"imageUrl"`
+	Barcode    *string   `json:"barcode"`
+	Brand      *string   `json:"brand"`
+	Stock      *int      `json:"stock"`
 	IsActive   *bool     `json:"isActive"`
 	IsCampaign *bool     `json:"isCampaign"`
 }
@@ -146,6 +152,16 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
+		if req.Stock == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "stock required"})
+			return
+		}
+
+		if *req.Stock < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "stock must be zero or greater"})
+			return
+		}
+
 		isActive := true
 		if req.IsActive != nil {
 			isActive = *req.IsActive
@@ -158,11 +174,18 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 
 		now := time.Now()
 
+		barcode := strings.TrimSpace(req.Barcode)
+		brand := strings.TrimSpace(req.Brand)
+
 		product := models.Product{
 			Name:       req.Name,
 			Price:      req.Price,
 			Category:   models.StringList(categories),
 			ImageURL:   req.ImageURL,
+			Barcode:    barcode,
+			Brand:      brand,
+			Stock:      *req.Stock,
+			InStock:    *req.Stock > 0,
 			IsActive:   isActive,
 			IsCampaign: isCampaign,
 			IsDeleted:  false,
@@ -171,6 +194,10 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 
 		res, err := db.Collection("products").InsertOne(context.Background(), product)
 		if err != nil {
+			if mongo.IsDuplicateKeyError(err) {
+				c.JSON(http.StatusConflict, gin.H{"error": "barcode already exists"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
 		}
@@ -238,6 +265,19 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 		if req.ImageURL != nil {
 			update["imageUrl"] = *req.ImageURL
 		}
+		if req.Barcode != nil {
+			update["barcode"] = strings.TrimSpace(*req.Barcode)
+		}
+		if req.Brand != nil {
+			update["brand"] = strings.TrimSpace(*req.Brand)
+		}
+		if req.Stock != nil {
+			if *req.Stock < 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "stock must be zero or greater"})
+				return
+			}
+			update["stock"] = *req.Stock
+		}
 		if req.IsActive != nil {
 			update["isActive"] = *req.IsActive
 		}
@@ -266,10 +306,15 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 		if err != nil {
+			if mongo.IsDuplicateKeyError(err) {
+				c.JSON(http.StatusConflict, gin.H{"error": "barcode already exists"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
 		}
 
+		updated.InStock = updated.Stock > 0
 		c.JSON(http.StatusOK, updated)
 	}
 }

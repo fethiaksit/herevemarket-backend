@@ -27,6 +27,23 @@ func normalizeProductDocument(raw bson.M) (models.Product, error) {
 		raw["isCampaign"] = false
 	}
 
+	if val, ok := raw["stock"]; ok {
+		switch typed := val.(type) {
+		case int32:
+			raw["stock"] = int(typed)
+		case int64:
+			raw["stock"] = int(typed)
+		case float64:
+			raw["stock"] = int(typed)
+		case int:
+			raw["stock"] = typed
+		default:
+			raw["stock"] = 0
+		}
+	} else {
+		raw["stock"] = 0
+	}
+
 	data, err := bson.Marshal(raw)
 	if err != nil {
 		return models.Product{}, err
@@ -36,6 +53,8 @@ func normalizeProductDocument(raw bson.M) (models.Product, error) {
 	if err := bson.Unmarshal(data, &p); err != nil {
 		return models.Product{}, err
 	}
+
+	p.InStock = p.Stock > 0
 
 	return p, nil
 }

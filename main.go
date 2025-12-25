@@ -24,6 +24,10 @@ func main() {
 
 	log.Println("MongoDB connected to:", db.Name())
 
+	if err := database.EnsureProductIndexes(db); err != nil {
+		log.Fatalf("failed to ensure product indexes: %v", err)
+	}
+
 	r := gin.Default()
 	r.LoadHTMLGlob("templates/**/*")
 	r.Static("/public", "./public")
