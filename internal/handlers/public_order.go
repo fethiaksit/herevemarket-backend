@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -11,7 +10,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"backend/internal/models"
 )
@@ -84,6 +82,29 @@ func CreateOrder(db *mongo.Database) gin.HandlerFunc {
 		var orderID primitive.ObjectID
 		_, err = session.WithTransaction(ctx, func(sessCtx mongo.SessionContext) (interface{}, error) {
 			for _, item := range order.Items {
+				var product models.Product
+				err := db.Collection("products").FindOne(
+					sessCtx,
+					bson.M{
+						"_id":       item.ProductID,
+						"isDeleted": bson.M{"$ne": true},
+					},
+				).Decode(&product)
+				if err == mongo.ErrNoDocuments {
+					return nil, productNotFoundError{ProductID: item.ProductID}
+				}
+				if err != nil {
+					return nil, err
+				}
+
+				if product.Stock < item.Quantity {
+					return nil, outOfStockError{
+						ProductID: item.ProductID,
+						Available: product.Stock,
+						Requested: item.Quantity,
+					}
+				}
+
 				filter := bson.M{
 					"_id":       item.ProductID,
 					"isDeleted": bson.M{"$ne": true},
@@ -91,18 +112,16 @@ func CreateOrder(db *mongo.Database) gin.HandlerFunc {
 				}
 				update := bson.M{"$inc": bson.M{"stock": -item.Quantity}}
 
-				res := db.Collection("products").FindOneAndUpdate(
-					sessCtx,
-					filter,
-					update,
-					options.FindOneAndUpdate().SetReturnDocument(options.After),
-				)
-
-				if res.Err() == mongo.ErrNoDocuments {
-					return nil, outOfStockError{ProductID: item.ProductID}
+				res, err := db.Collection("products").UpdateOne(sessCtx, filter, update)
+				if err != nil {
+					return nil, err
 				}
-				if res.Err() != nil {
-					return nil, res.Err()
+				if res.MatchedCount == 0 {
+					return nil, outOfStockError{
+						ProductID: item.ProductID,
+						Available: product.Stock,
+						Requested: item.Quantity,
+					}
 				}
 			}
 
@@ -119,8 +138,18 @@ func CreateOrder(db *mongo.Database) gin.HandlerFunc {
 			var stockErr outOfStockError
 			if errors.As(err, &stockErr) {
 				c.JSON(http.StatusBadRequest, gin.H{
-					"error":     "Ürün stokta yok",
+					"error":     "Stok yetersiz",
 					"productId": stockErr.ProductID.Hex(),
+					"available": stockErr.Available,
+					"requested": stockErr.Requested,
+				})
+				return
+			}
+			var notFoundErr productNotFoundError
+			if errors.As(err, &notFoundErr) {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":     "Ürün bulunamadı",
+					"productId": notFoundErr.ProductID.Hex(),
 				})
 				return
 			}
@@ -201,7 +230,6 @@ func buildOrderFromRequest(req createOrderRequest) (models.Order, error) {
 			Price:     item.Price,
 			Quantity:  item.Quantity,
 		})
-		fmt.Println(items)
 		total += item.Price * float64(item.Quantity)
 	}
 
@@ -219,8 +247,18 @@ func buildOrderFromRequest(req createOrderRequest) (models.Order, error) {
 
 type outOfStockError struct {
 	ProductID primitive.ObjectID
+	Available int
+	Requested int
 }
 
 func (e outOfStockError) Error() string {
 	return "product out of stock"
+}
+
+type productNotFoundError struct {
+	ProductID primitive.ObjectID
+}
+
+func (e productNotFoundError) Error() string {
+	return "product not found"
 }
