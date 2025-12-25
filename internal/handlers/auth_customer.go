@@ -1,18 +1,23 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
+	"github.com/go-playground/validator/v10"
 	"github.com/golang-jwt/jwt/v5"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -31,9 +36,9 @@ type RegisterRequest struct {
 }
 
 type RegisterUserRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	Name     string `json:"name"`
+	Email    string `json:"email" binding:"required"`
+	Password string `json:"password" binding:"required"`
+	Name     string `json:"name" binding:"required"`
 }
 
 type LoginResponseUser struct {
@@ -60,29 +65,87 @@ type AuthTokens struct {
 
 func Register(db *mongo.Database, jwtSecret string, accessTTL time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		body, err := c.GetRawData()
+		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			log.Println("[AUTH] [ERROR] register read body failed:", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 			return
 		}
+		log.Printf("[AUTH] [DEBUG] register content-type: %s", c.GetHeader("Content-Type"))
+		log.Printf("[AUTH] [DEBUG] register raw body: %s", string(body))
 
-		var customerReq RegisterRequest
-		var userReq RegisterUserRequest
-		if err := json.Unmarshal(body, &customerReq); err != nil {
-			log.Println("[AUTH] [ERROR] register parse failed:", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		if len(bytes.TrimSpace(body)) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "request body is required"})
 			return
 		}
-		_ = json.Unmarshal(body, &userReq)
 
-		if strings.TrimSpace(customerReq.FirstName) != "" || strings.TrimSpace(customerReq.LastName) != "" {
+		var payload map[string]interface{}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			log.Println("[AUTH] [ERROR] register parse failed:", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON payload", "details": err.Error()})
+			return
+		}
+
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+
+		hasCustomerFields := false
+		if _, ok := payload["firstName"]; ok {
+			hasCustomerFields = true
+		}
+		if _, ok := payload["lastName"]; ok {
+			hasCustomerFields = true
+		}
+		if _, ok := payload["phone"]; ok {
+			hasCustomerFields = true
+		}
+
+		if hasCustomerFields {
+			var customerReq RegisterRequest
+			if err := c.ShouldBindBodyWith(&customerReq, binding.JSON); err != nil {
+				respondValidationError(c, err)
+				return
+			}
 			registerCustomer(c, db, customerReq)
 			return
 		}
 
+		var userReq RegisterUserRequest
+		if err := c.ShouldBindBodyWith(&userReq, binding.JSON); err != nil {
+			respondValidationError(c, err)
+			return
+		}
 		registerUser(c, db, userReq, jwtSecret, accessTTL)
 	}
+}
+
+func respondValidationError(c *gin.Context, err error) {
+	var validationErrors validator.ValidationErrors
+	if errors.As(err, &validationErrors) {
+		details := make([]string, 0, len(validationErrors))
+		for _, fieldError := range validationErrors {
+			field := lowerCamel(fieldError.Field())
+			switch fieldError.Tag() {
+			case "required":
+				details = append(details, fmt.Sprintf("%s is required", field))
+			default:
+				details = append(details, fmt.Sprintf("%s is invalid", field))
+			}
+		}
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "validation failed",
+			"details": details,
+		})
+		return
+	}
+
+	c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body", "details": err.Error()})
+}
+
+func lowerCamel(field string) string {
+	if field == "" {
+		return field
+	}
+	return strings.ToLower(field[:1]) + field[1:]
 }
 
 func Login(db *mongo.Database, jwtSecret string, accessTTL, refreshTTL time.Duration) gin.HandlerFunc {
