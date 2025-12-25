@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -27,7 +30,7 @@ type ProductCreateRequest struct {
 	ImageURL   string   `json:"imageUrl" binding:"required"`
 	Barcode    string   `json:"barcode"`
 	Brand      string   `json:"brand"`
-	Stock      *int     `json:"stock" binding:"required"`
+	Stock      *int     `json:"stock"`
 	IsActive   *bool    `json:"isActive"`
 	IsCampaign *bool    `json:"isCampaign"`
 }
@@ -140,24 +143,53 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 
 func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		log.Println("CreateProduct: request received")
+		body, err := c.GetRawData()
+		if err != nil {
+			log.Println("CreateProduct RETURN 400:", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+		log.Println("CreateProduct raw body:", string(body))
+
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+
 		var req ProductCreateRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			log.Println("CreateProduct bind error:", err)
+			log.Println("CreateProduct RETURN 400:", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		log.Printf("CreateProduct parsed request: %+v", req)
+
+		if strings.TrimSpace(req.Name) == "" {
+			log.Println("CreateProduct RETURN 400:", "name required")
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
+			return
+		}
+
+		if req.Price <= 0 {
+			log.Println("CreateProduct RETURN 400:", "invalid price")
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid price"})
 			return
 		}
 
 		categories := normalizeCategories(req.Category)
 		if len(categories) == 0 {
+			log.Println("CreateProduct RETURN 400:", "category required")
 			c.JSON(http.StatusBadRequest, gin.H{"error": "category required"})
 			return
 		}
 
 		if req.Stock == nil {
+			log.Println("CreateProduct RETURN 400:", "stock required")
 			c.JSON(http.StatusBadRequest, gin.H{"error": "stock required"})
 			return
 		}
 
 		if *req.Stock < 0 {
+			log.Println("CreateProduct RETURN 400:", "stock must be zero or greater")
 			c.JSON(http.StatusBadRequest, gin.H{"error": "stock must be zero or greater"})
 			return
 		}
@@ -192,17 +224,22 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 			CreatedAt:  now,
 		}
 
+		log.Printf("CreateProduct inserting product: %+v", product)
 		res, err := db.Collection("products").InsertOne(context.Background(), product)
 		if err != nil {
+			log.Println("CreateProduct insert error:", err)
 			if mongo.IsDuplicateKeyError(err) {
+				log.Println("CreateProduct RETURN 409:", err)
 				c.JSON(http.StatusConflict, gin.H{"error": "barcode already exists"})
 				return
 			}
+			log.Println("CreateProduct RETURN 500:", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
 		}
 
 		product.ID = res.InsertedID.(primitive.ObjectID)
+		log.Println("CreateProduct insert success:", res.InsertedID)
 		c.JSON(http.StatusCreated, product)
 	}
 }
@@ -215,24 +252,32 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := primitive.ObjectIDFromHex(c.Param("id"))
 		if err != nil {
+			log.Println("UpdateProduct RETURN 400:", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 			return
 		}
+		log.Println("UpdateProduct request received for id:", id.Hex())
 
 		body, err := c.GetRawData()
 		if err != nil {
+			log.Println("UpdateProduct read body error:", err)
+			log.Println("UpdateProduct RETURN 400:", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 			return
 		}
+		log.Println("UpdateProduct raw body:", string(body))
 
 		var raw map[string]interface{}
 		if err := json.Unmarshal(body, &raw); err != nil {
+			log.Println("UpdateProduct raw json error:", err)
+			log.Println("UpdateProduct RETURN 400:", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 			return
 		}
 
 		if val, ok := raw["isCampaign"]; ok {
 			if _, ok := val.(bool); !ok {
+				log.Println("UpdateProduct RETURN 400:", "isCampaign must be boolean")
 				c.JSON(http.StatusBadRequest, gin.H{"error": "isCampaign must be boolean"})
 				return
 			}
@@ -240,76 +285,128 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 
 		var req ProductUpdateRequest
 		if err := json.Unmarshal(body, &req); err != nil {
+			log.Println("UpdateProduct bind error:", err)
+			log.Println("UpdateProduct RETURN 400:", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 			return
 		}
+		log.Printf("UpdateProduct parsed request: %+v", req)
 
-		update := bson.M{}
+		updateSet := bson.M{}
+		updateUnset := bson.M{}
 
 		if req.Name != nil {
-			update["name"] = *req.Name
+			updateSet["name"] = *req.Name
 		}
 		if req.Price != nil {
-			update["price"] = *req.Price
+			if *req.Price <= 0 {
+				log.Println("UpdateProduct RETURN 400:", "invalid price")
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid price"})
+				return
+			}
+			updateSet["price"] = *req.Price
 		}
 		if req.Category != nil {
 			cats := normalizeCategories(*req.Category)
 			if len(cats) == 0 {
+				log.Println("UpdateProduct RETURN 400:", "category required")
 				c.JSON(http.StatusBadRequest, gin.H{"error": "category required"})
 				return
 			}
 
-			update["category"] = cats
+			updateSet["category"] = models.StringList(cats)
 
 		}
 		if req.ImageURL != nil {
-			update["imageUrl"] = *req.ImageURL
+			updateSet["imageUrl"] = *req.ImageURL
 		}
 		if req.Barcode != nil {
-			update["barcode"] = strings.TrimSpace(*req.Barcode)
+			barcode := strings.TrimSpace(*req.Barcode)
+			if barcode == "" {
+				updateUnset["barcode"] = ""
+			} else {
+				updateSet["barcode"] = barcode
+			}
 		}
 		if req.Brand != nil {
-			update["brand"] = strings.TrimSpace(*req.Brand)
+			updateSet["brand"] = strings.TrimSpace(*req.Brand)
 		}
 		if req.Stock != nil {
 			if *req.Stock < 0 {
+				log.Println("UpdateProduct RETURN 400:", "stock must be zero or greater")
 				c.JSON(http.StatusBadRequest, gin.H{"error": "stock must be zero or greater"})
 				return
 			}
-			update["stock"] = *req.Stock
+			updateSet["stock"] = *req.Stock
 		}
 		if req.IsActive != nil {
-			update["isActive"] = *req.IsActive
+			updateSet["isActive"] = *req.IsActive
 		}
 		if req.IsCampaign != nil {
-			update["isCampaign"] = *req.IsCampaign
+			updateSet["isCampaign"] = *req.IsCampaign
 		}
 
-		if len(update) == 0 {
+		if len(updateSet) == 0 && len(updateUnset) == 0 {
+			log.Println("UpdateProduct RETURN 400:", "no fields to update")
 			c.JSON(http.StatusBadRequest, gin.H{"error": "no fields to update"})
 			return
 		}
 
-		var updated models.Product
-		err = db.Collection("products").FindOneAndUpdate(
+		update := bson.M{}
+		if len(updateSet) > 0 {
+			update["$set"] = updateSet
+		}
+		if len(updateUnset) > 0 {
+			update["$unset"] = updateUnset
+		}
+		log.Printf("UpdateProduct update document: %+v", update)
+
+		result, err := db.Collection("products").UpdateOne(
 			context.Background(),
 			bson.M{
 				"_id":       id,
 				"isDeleted": bson.M{"$ne": true},
 			},
-			bson.M{"$set": update},
-			options.FindOneAndUpdate().SetReturnDocument(options.After),
+			update,
+		)
+
+		if err != nil {
+			log.Println("UpdateProduct update error:", err)
+			if mongo.IsDuplicateKeyError(err) {
+				log.Println("UpdateProduct RETURN 409:", err)
+				c.JSON(http.StatusConflict, gin.H{"error": "barcode already exists"})
+				return
+			}
+			log.Println("UpdateProduct RETURN 500:", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+			return
+		}
+
+		log.Printf("UpdateProduct update result: matched=%d modified=%d", result.MatchedCount, result.ModifiedCount)
+
+		if result.MatchedCount == 0 {
+			log.Println("UpdateProduct RETURN 404:", "product not found")
+			c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
+			return
+		}
+
+		var updated models.Product
+		err = db.Collection("products").FindOne(
+			context.Background(),
+			bson.M{
+				"_id":       id,
+				"isDeleted": bson.M{"$ne": true},
+			},
 		).Decode(&updated)
 
 		if err == mongo.ErrNoDocuments {
+			log.Println("UpdateProduct RETURN 404:", err)
 			c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
 			return
 		}
 		if err != nil {
-			if mongo.IsDuplicateKeyError(err) {
-				c.JSON(http.StatusConflict, gin.H{"error": "barcode already exists"})
-				return
-			}
+			log.Println("UpdateProduct find error:", err)
+			log.Println("UpdateProduct RETURN 500:", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
 		}

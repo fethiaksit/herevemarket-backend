@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -21,10 +22,19 @@ func EnsureProductIndexes(db *mongo.Database) error {
 			SetName("barcode_unique").
 			SetUnique(true).
 			SetPartialFilterExpression(bson.M{
-				"barcode": bson.M{"$exists": true},
+				"barcode": bson.M{
+					"$exists": true,
+					"$ne":     "",
+				},
 			}),
 	}
 
+	log.Println("EnsureProductIndexes: creating barcode_unique index")
 	_, err := indexes.CreateOne(ctx, barcodeIndex)
-	return err
+	if err != nil {
+		log.Println("EnsureProductIndexes: barcode index error:", err)
+		return err
+	}
+	log.Println("EnsureProductIndexes: barcode_unique index created")
+	return nil
 }
