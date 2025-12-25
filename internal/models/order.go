@@ -23,11 +23,12 @@ type OrderCustomer struct {
 
 // Order defines the persisted order document.
 type Order struct {
-	ID            primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Items         []OrderItem        `bson:"items" json:"items"`
-	TotalPrice    float64            `bson:"totalPrice" json:"totalPrice"`
-	Customer      OrderCustomer      `bson:"customer" json:"customer"`
-	PaymentMethod string             `bson:"paymentMethod" json:"paymentMethod"`
-	Status        string             `bson:"status" json:"status"`
-	CreatedAt     time.Time          `bson:"createdAt" json:"createdAt"`
+	ID            primitive.ObjectID  `bson:"_id,omitempty" json:"id"`
+	UserID        *primitive.ObjectID `bson:"userId" json:"userId"`
+	Items         []OrderItem         `bson:"items" json:"items"`
+	TotalPrice    float64             `bson:"totalPrice" json:"totalPrice"`
+	Customer      OrderCustomer       `bson:"customer" json:"customer"`
+	PaymentMethod string              `bson:"paymentMethod" json:"paymentMethod"`
+	Status        string              `bson:"status" json:"status"`
+	CreatedAt     time.Time           `bson:"createdAt" json:"createdAt"`
 }

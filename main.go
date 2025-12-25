@@ -27,6 +27,12 @@ func main() {
 	if err := database.EnsureProductIndexes(db); err != nil {
 		log.Println("⚠️ product index warning: %v", err)
 	}
+	if err := database.EnsureUserIndexes(db); err != nil {
+		log.Println("⚠️ user index warning: %v", err)
+	}
+	if err := database.EnsureOrderIndexes(db); err != nil {
+		log.Println("⚠️ order index warning: %v", err)
+	}
 
 	r := gin.Default()
 	r.LoadHTMLGlob("templates/**/*")
@@ -38,13 +44,14 @@ func main() {
 	r.GET("/admin/products", handlers.AdminProductsPage)
 	r.GET("/admin/orders", handlers.AdminOrdersPage)
 
-	r.POST("/auth/register", handlers.Register(db))
+	r.POST("/auth/register", handlers.Register(db, config.AppEnv.JWTSecret, config.AppEnv.AccessTokenTTL))
 	r.POST("/auth/login", handlers.Login(
 		db,
 		config.AppEnv.JWTSecret,
 		config.AppEnv.AccessTokenTTL,
 		config.AppEnv.RefreshTokenTTL,
 	))
+	r.GET("/auth/me", middleware.UserAuth(config.AppEnv.JWTSecret), handlers.GetMe(db))
 	r.POST("/auth/refresh", handlers.Refresh(
 		db,
 		config.AppEnv.JWTSecret,
@@ -58,8 +65,17 @@ func main() {
 	r.GET("/products", handlers.GetProducts(db))
 	r.GET("/categories", handlers.GetCategories(db))
 	r.GET("/products/campaign", handlers.GetCampaignProducts(db))
-	r.POST("/orders", handlers.CreateOrder(db))
+	r.POST("/orders", handlers.CreateOrder(db, config.AppEnv.JWTSecret))
 	r.GET("/orders", handlers.GetOrders(db))
+
+	user := r.Group("/user")
+	user.Use(middleware.UserAuth(config.AppEnv.JWTSecret))
+	{
+		user.GET("/addresses", handlers.GetUserAddresses(db))
+		user.POST("/addresses", handlers.CreateUserAddress(db))
+		user.PUT("/addresses/:id", handlers.UpdateUserAddress(db))
+		user.DELETE("/addresses/:id", handlers.DeleteUserAddress(db))
+	}
 
 	admin := r.Group("/admin/api")
 	admin.Use(middleware.AdminAuth(config.AppEnv.JWTSecret))

@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -26,6 +28,12 @@ type RegisterRequest struct {
 	Email     string `json:"email" binding:"required"`
 	Password  string `json:"password" binding:"required"`
 	Phone     string `json:"phone"`
+}
+
+type RegisterUserRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Name     string `json:"name"`
 }
 
 type LoginResponseUser struct {
@@ -50,58 +58,30 @@ type AuthTokens struct {
 	ExpiresIn    int64  `json:"expiresIn"`
 }
 
-func Register(db *mongo.Database) gin.HandlerFunc {
+func Register(db *mongo.Database, jwtSecret string, accessTTL time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var req RegisterRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
+		body, err := c.GetRawData()
+		if err != nil {
+			log.Println("[AUTH] [ERROR] register read body failed:", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 			return
 		}
 
-		email := strings.ToLower(strings.TrimSpace(req.Email))
-		if email == "" || strings.TrimSpace(req.Password) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "email and password are required"})
+		var customerReq RegisterRequest
+		var userReq RegisterUserRequest
+		if err := json.Unmarshal(body, &customerReq); err != nil {
+			log.Println("[AUTH] [ERROR] register parse failed:", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+		_ = json.Unmarshal(body, &userReq)
+
+		if strings.TrimSpace(customerReq.FirstName) != "" || strings.TrimSpace(customerReq.LastName) != "" {
+			registerCustomer(c, db, customerReq)
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		count, err := db.Collection("customers").CountDocuments(ctx, bson.M{"email": email})
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
-			return
-		}
-		if count > 0 {
-			c.JSON(http.StatusConflict, gin.H{"error": "email already registered"})
-			return
-		}
-
-		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "password hash failed"})
-			return
-		}
-
-		now := time.Now()
-		customer := models.Customer{
-			FirstName:    strings.TrimSpace(req.FirstName),
-			LastName:     strings.TrimSpace(req.LastName),
-			Email:        email,
-			Phone:        strings.TrimSpace(req.Phone),
-			PasswordHash: string(hash),
-			IsActive:     true,
-			Role:         "user",
-			CreatedAt:    now,
-			UpdatedAt:    now,
-		}
-
-		if _, err := db.Collection("customers").InsertOne(ctx, customer); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
-			return
-		}
-
-		c.JSON(http.StatusCreated, gin.H{"message": "User registered successfully"})
+		registerUser(c, db, userReq, jwtSecret, accessTTL)
 	}
 }
 
@@ -122,36 +102,72 @@ func Login(db *mongo.Database, jwtSecret string, accessTTL, refreshTTL time.Dura
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		var user models.Customer
-		if err := db.Collection("customers").FindOne(ctx, bson.M{"email": email}).Decode(&user); err != nil {
+		var user models.User
+		if err := db.Collection("users").FindOne(ctx, bson.M{"email": email}).Decode(&user); err == nil {
+			if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+				log.Println("[AUTH] [ERROR] login invalid credentials for user")
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+				return
+			}
+
+			accessToken, err := issueUserToken(user.ID, user.Email, jwtSecret, accessTTL)
+			if err != nil {
+				log.Println("[AUTH] [ERROR] login token generation failed:", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "token generation failed"})
+				return
+			}
+
+			log.Println("[AUTH] [INFO] user login succeeded:", user.Email)
+			c.JSON(http.StatusOK, gin.H{
+				"accessToken": accessToken,
+				"user": gin.H{
+					"id":    user.ID.Hex(),
+					"name":  user.Name,
+					"email": user.Email,
+				},
+			})
+			return
+		} else if err != mongo.ErrNoDocuments {
+			log.Println("[AUTH] [ERROR] login user lookup failed:", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+			return
+		}
+
+		var customer models.Customer
+		if err := db.Collection("customers").FindOne(ctx, bson.M{"email": email}).Decode(&customer); err != nil {
+			log.Println("[AUTH] [ERROR] login invalid credentials for customer")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 			return
 		}
 
-		if !user.IsActive {
+		if !customer.IsActive {
+			log.Println("[AUTH] [ERROR] customer inactive:", email)
 			c.JSON(http.StatusForbidden, gin.H{"error": "user is inactive"})
 			return
 		}
 
-		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		if err := bcrypt.CompareHashAndPassword([]byte(customer.PasswordHash), []byte(req.Password)); err != nil {
+			log.Println("[AUTH] [ERROR] login invalid credentials for customer")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 			return
 		}
 
-		tokens, err := issueTokens(c, db, user.ID, user.Email, user.Role, jwtSecret, accessTTL, refreshTTL)
+		tokens, err := issueTokens(c, db, customer.ID, customer.Email, customer.Role, jwtSecret, accessTTL, refreshTTL)
 		if err != nil {
+			log.Println("[AUTH] [ERROR] customer login token generation failed:", err)
 			return
 		}
 
+		log.Println("[AUTH] [INFO] customer login succeeded:", customer.Email)
 		c.JSON(http.StatusOK, gin.H{
 			"accessToken":  tokens.AccessToken,
 			"refreshToken": tokens.RefreshToken,
 			"expiresIn":    tokens.ExpiresIn,
 			"user": LoginResponseUser{
-				ID:        user.ID.Hex(),
-				FirstName: user.FirstName,
-				LastName:  user.LastName,
-				Email:     user.Email,
+				ID:        customer.ID.Hex(),
+				FirstName: customer.FirstName,
+				LastName:  customer.LastName,
+				Email:     customer.Email,
 			},
 		})
 	}
@@ -261,6 +277,136 @@ func Logout(db *mongo.Database) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 	}
+}
+
+func registerCustomer(c *gin.Context, db *mongo.Database, req RegisterRequest) {
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if email == "" || strings.TrimSpace(req.Password) == "" || strings.TrimSpace(req.FirstName) == "" || strings.TrimSpace(req.LastName) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "firstName, lastName, email and password are required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	count, err := db.Collection("customers").CountDocuments(ctx, bson.M{"email": email})
+	if err != nil {
+		log.Println("[AUTH] [ERROR] customer register db error:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+	if count > 0 {
+		log.Println("[AUTH] [ERROR] customer register email exists:", email)
+		c.JSON(http.StatusConflict, gin.H{"error": "email already registered"})
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Println("[AUTH] [ERROR] customer register password hash failed:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "password hash failed"})
+		return
+	}
+
+	now := time.Now()
+	customer := models.Customer{
+		FirstName:    strings.TrimSpace(req.FirstName),
+		LastName:     strings.TrimSpace(req.LastName),
+		Email:        email,
+		Phone:        strings.TrimSpace(req.Phone),
+		PasswordHash: string(hash),
+		IsActive:     true,
+		Role:         "user",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	if _, err := db.Collection("customers").InsertOne(ctx, customer); err != nil {
+		log.Println("[AUTH] [ERROR] customer register insert failed:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+
+	log.Println("[AUTH] [INFO] customer registered:", email)
+	c.JSON(http.StatusCreated, gin.H{"message": "User registered successfully"})
+}
+
+func registerUser(c *gin.Context, db *mongo.Database, req RegisterUserRequest, jwtSecret string, accessTTL time.Duration) {
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	name := strings.TrimSpace(req.Name)
+	password := strings.TrimSpace(req.Password)
+	if email == "" || name == "" || password == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "email, password and name are required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	count, err := db.Collection("users").CountDocuments(ctx, bson.M{"email": email})
+	if err != nil {
+		log.Println("[AUTH] [ERROR] user register db error:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+	if count > 0 {
+		log.Println("[AUTH] [ERROR] user register email exists:", email)
+		c.JSON(http.StatusConflict, gin.H{"error": "email already registered"})
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Println("[AUTH] [ERROR] user register password hash failed:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "password hash failed"})
+		return
+	}
+
+	now := time.Now()
+	user := models.User{
+		Email:        email,
+		PasswordHash: string(hash),
+		Name:         name,
+		Addresses:    []models.Address{},
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	res, err := db.Collection("users").InsertOne(ctx, user)
+	if err != nil {
+		log.Println("[AUTH] [ERROR] user register insert failed:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+
+	id, _ := res.InsertedID.(primitive.ObjectID)
+	accessToken, err := issueUserToken(id, email, jwtSecret, accessTTL)
+	if err != nil {
+		log.Println("[AUTH] [ERROR] user register token generation failed:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "token generation failed"})
+		return
+	}
+
+	log.Println("[AUTH] [INFO] user registered:", email)
+	c.JSON(http.StatusCreated, gin.H{
+		"accessToken": accessToken,
+		"user": gin.H{
+			"id":    id.Hex(),
+			"name":  name,
+			"email": email,
+		},
+	})
+}
+
+func issueUserToken(userID primitive.ObjectID, email, secret string, accessTTL time.Duration) (string, error) {
+	claims := jwt.MapClaims{
+		"userId": userID.Hex(),
+		"email":  email,
+		"exp":    time.Now().Add(accessTTL).Unix(),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(secret))
 }
 
 type issuedTokens struct {
