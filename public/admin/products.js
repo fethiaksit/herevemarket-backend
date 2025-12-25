@@ -27,6 +27,17 @@ function getSelectedCategories(select) {
     .filter(function(value) { return !!value; });
 }
 
+function parseStockValue(value) {
+  const stock = Number(value);
+  if (!Number.isFinite(stock) || stock < 0) return null;
+  return stock;
+}
+
+function normalizeBarcode(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
 async function populateProductCategorySelects(selectedValues, preloadedCategories) {
   const desiredSelection = normalizeCategoryValues(selectedValues);
   const categoryData = Array.isArray(preloadedCategories) && preloadedCategories.length > 0
@@ -156,7 +167,7 @@ function renderProductList(data) {
   if (!Array.isArray(data) || data.length === 0) {
     const emptyRow = document.createElement("tr");
     const emptyCell = document.createElement("td");
-    emptyCell.colSpan = 3;
+    emptyCell.colSpan = 6;
     emptyCell.className = "muted";
     emptyCell.textContent = "Ürün yok";
     emptyRow.appendChild(emptyCell);
@@ -172,6 +183,11 @@ function renderProductList(data) {
     const row = document.createElement("tr");
     row.className = "product-row";
 
+    const stockValue = Number.isFinite(Number(product.stock)) ? Number(product.stock) : null;
+    if (stockValue === 0) {
+      row.classList.add("out-of-stock-row");
+    }
+
     const info = document.createElement("td");
     info.className = "stacked-text clickable";
     info.innerHTML =
@@ -181,7 +197,25 @@ function renderProductList(data) {
       "</div>";
     info.onclick = function() { selectProduct(product); };
 
+    const brandCell = document.createElement("td");
+    brandCell.textContent = product.brand || "-";
+
+    const barcodeCell = document.createElement("td");
+    barcodeCell.textContent = product.barcode || "-";
+
+    const stockCell = document.createElement("td");
+    const stockText = stockValue === null ? "-" : stockValue;
+    stockCell.textContent = stockText;
+    if (stockValue === 0) {
+      const badge = document.createElement("span");
+      badge.className = "badge out-of-stock";
+      badge.textContent = "Tükendi";
+      stockCell.textContent = "";
+      stockCell.appendChild(badge);
+    }
+
     const campaignCell = document.createElement("td");
+    campaignCell.className = "campaign-cell";
     const campaignToggle = document.createElement("input");
     campaignToggle.type = "checkbox";
     campaignToggle.className = "campaign-toggle";
@@ -211,6 +245,9 @@ function renderProductList(data) {
     actions.appendChild(deleteBtn);
 
     row.appendChild(info);
+    row.appendChild(brandCell);
+    row.appendChild(barcodeCell);
+    row.appendChild(stockCell);
     row.appendChild(campaignCell);
     row.appendChild(actions);
 
@@ -258,7 +295,11 @@ async function selectProduct(product) {
   const form = document.getElementById("editProduct");
   form.elements.name.value = product.name || "";
   form.elements.price.value = (product.price ?? "");
+  form.elements.brand.value = product.brand || "";
+  form.elements.barcode.value = product.barcode || "";
+  form.elements.stock.value = (product.stock ?? "");
   form.elements.imageUrl.value = product.imageUrl || "";
+  form.elements.isCampaign.checked = !!product.isCampaign;
   form.elements.isActive.checked = !!product.isActive;
 }
 
@@ -310,11 +351,19 @@ document.getElementById("addProduct").addEventListener("submit", async function(
     return;
   }
 
+  const stock = parseStockValue(form.get("stock"));
+  if (stock === null) {
+    alert("Stok 0 veya daha büyük olmalı");
+    return;
+  }
+
   const categories = getSelectedCategories(event.target.querySelector('select[name="category"]'));
   if (categories.length === 0) {
     alert("En az bir kategori seç");
     return;
   }
+
+  const barcode = normalizeBarcode(form.get("barcode"));
 
   const res = await fetch("/admin/api/products", {
     method: "POST",
@@ -322,8 +371,12 @@ document.getElementById("addProduct").addEventListener("submit", async function(
     body: JSON.stringify({
       name: form.get("name"),
       price: price,
+      brand: form.get("brand"),
+      barcode: barcode,
+      stock: stock,
       category: categories,
       imageUrl: form.get("imageUrl"),
+      isCampaign: form.get("isCampaign") === "on",
       isActive: true
     })
   });
@@ -351,11 +404,19 @@ document.getElementById("editProduct").addEventListener("submit", async function
     return;
   }
 
+  const stock = parseStockValue(form.get("stock"));
+  if (stock === null) {
+    alert("Stok 0 veya daha büyük olmalı");
+    return;
+  }
+
   const categories = getSelectedCategories(event.target.querySelector('select[name="category"]'));
   if (categories.length === 0) {
     alert("En az bir kategori seç");
     return;
   }
+
+  const barcode = normalizeBarcode(form.get("barcode"));
 
   const res = await fetch("/admin/api/products/" + id, {
     method: "PUT",
@@ -363,8 +424,12 @@ document.getElementById("editProduct").addEventListener("submit", async function
     body: JSON.stringify({
       name: form.get("name"),
       price: price,
+      brand: form.get("brand"),
+      barcode: barcode,
+      stock: stock,
       category: categories,
       imageUrl: form.get("imageUrl"),
+      isCampaign: form.get("isCampaign") === "on",
       isActive: form.get("isActive") === "on"
     })
   });
