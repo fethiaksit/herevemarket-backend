@@ -7,18 +7,19 @@ import (
 )
 
 type Product struct {
-	ID         primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Name       string             `bson:"name" json:"name"`
-	Price      float64            `bson:"price" json:"price"`
-	Category   StringList         `bson:"category" json:"category"`
-	ImageURL   string             `bson:"imageUrl" json:"imageUrl"`
-	Barcode    string             `bson:"barcode,omitempty" json:"barcode,omitempty"`
-	Brand      string             `bson:"brand,omitempty" json:"brand,omitempty"`
-	Stock      int                `bson:"stock" json:"stock"`
-	InStock    bool               `bson:"-" json:"inStock"`
-	IsActive   bool               `bson:"isActive" json:"isActive"`
-	IsCampaign bool               `bson:"isCampaign" json:"isCampaign"`
-	IsDeleted  bool               `bson:"isDeleted" json:"isDeleted,omitempty"`
-	DeletedAt  *time.Time         `bson:"deletedAt,omitempty" json:"deletedAt,omitempty"`
-	CreatedAt  time.Time          `bson:"createdAt" json:"createdAt"`
+	ID          primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Name        string             `bson:"name" json:"name"`
+	Price       float64            `bson:"price" json:"price"`
+	Category    StringList         `bson:"category" json:"category"`
+	ImageURL    string             `bson:"imageUrl" json:"imageUrl"`
+	Description string             `bson:"description,omitempty" json:"description,omitempty"`
+	Barcode     string             `bson:"barcode,omitempty" json:"barcode,omitempty"`
+	Brand       string             `bson:"brand,omitempty" json:"brand,omitempty"`
+	Stock       int                `bson:"stock" json:"stock"`
+	InStock     bool               `bson:"-" json:"inStock"`
+	IsActive    bool               `bson:"isActive" json:"isActive"`
+	IsCampaign  bool               `bson:"isCampaign" json:"isCampaign"`
+	IsDeleted   bool               `bson:"isDeleted" json:"isDeleted,omitempty"`
+	DeletedAt   *time.Time         `bson:"deletedAt,omitempty" json:"deletedAt,omitempty"`
+	CreatedAt   time.Time          `bson:"createdAt" json:"createdAt"`
 }

@@ -24,27 +24,29 @@ import (
 ======================= */
 
 type ProductCreateRequest struct {
-	Name       string   `json:"name" binding:"required"`
-	Price      float64  `json:"price" binding:"required"`
-	Category   []string `json:"category" binding:"required"`
-	ImageURL   string   `json:"imageUrl" binding:"required"`
-	Barcode    string   `json:"barcode"`
-	Brand      string   `json:"brand"`
-	Stock      *int     `json:"stock"`
-	IsActive   *bool    `json:"isActive"`
-	IsCampaign *bool    `json:"isCampaign"`
+	Name        string   `json:"name" binding:"required"`
+	Price       float64  `json:"price" binding:"required"`
+	Category    []string `json:"category" binding:"required"`
+	ImageURL    string   `json:"imageUrl" binding:"required"`
+	Description string   `json:"description"`
+	Barcode     string   `json:"barcode"`
+	Brand       string   `json:"brand"`
+	Stock       *int     `json:"stock"`
+	IsActive    *bool    `json:"isActive"`
+	IsCampaign  *bool    `json:"isCampaign"`
 }
 
 type ProductUpdateRequest struct {
-	Name       *string   `json:"name"`
-	Price      *float64  `json:"price"`
-	Category   *[]string `json:"category"`
-	ImageURL   *string   `json:"imageUrl"`
-	Barcode    *string   `json:"barcode"`
-	Brand      *string   `json:"brand"`
-	Stock      *int      `json:"stock"`
-	IsActive   *bool     `json:"isActive"`
-	IsCampaign *bool     `json:"isCampaign"`
+	Name        *string   `json:"name"`
+	Price       *float64  `json:"price"`
+	Category    *[]string `json:"category"`
+	ImageURL    *string   `json:"imageUrl"`
+	Description *string   `json:"description"`
+	Barcode     *string   `json:"barcode"`
+	Brand       *string   `json:"brand"`
+	Stock       *int      `json:"stock"`
+	IsActive    *bool     `json:"isActive"`
+	IsCampaign  *bool     `json:"isCampaign"`
 }
 
 /* =======================
@@ -208,20 +210,22 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 
 		barcode := strings.TrimSpace(req.Barcode)
 		brand := strings.TrimSpace(req.Brand)
+		description := strings.TrimSpace(req.Description)
 
 		product := models.Product{
-			Name:       req.Name,
-			Price:      req.Price,
-			Category:   models.StringList(categories),
-			ImageURL:   req.ImageURL,
-			Barcode:    barcode,
-			Brand:      brand,
-			Stock:      *req.Stock,
-			InStock:    *req.Stock > 0,
-			IsActive:   isActive,
-			IsCampaign: isCampaign,
-			IsDeleted:  false,
-			CreatedAt:  now,
+			Name:        req.Name,
+			Price:       req.Price,
+			Category:    models.StringList(categories),
+			ImageURL:    req.ImageURL,
+			Description: description,
+			Barcode:     barcode,
+			Brand:       brand,
+			Stock:       *req.Stock,
+			InStock:     *req.Stock > 0,
+			IsActive:    isActive,
+			IsCampaign:  isCampaign,
+			IsDeleted:   false,
+			CreatedAt:   now,
 		}
 
 		log.Printf("CreateProduct inserting product: %+v", product)
@@ -319,6 +323,9 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 		}
 		if req.ImageURL != nil {
 			updateSet["imageUrl"] = *req.ImageURL
+		}
+		if req.Description != nil {
+			updateSet["description"] = strings.TrimSpace(*req.Description)
 		}
 		if req.Barcode != nil {
 			barcode := strings.TrimSpace(*req.Barcode)
