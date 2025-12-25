@@ -43,7 +43,8 @@ function normalizeBrand(value) {
   return String(value).trim();
 }
 
-async function populateProductCategorySelects(selectedValues, preloadedCategories) {
+// ✅ DÜZELTME 1: targetSelect parametresi eklendi. Sadece istenen kutuyu günceller.
+async function populateProductCategorySelects(selectedValues, preloadedCategories, targetSelect) {
   const desiredSelection = normalizeCategoryValues(selectedValues);
   const categoryData = Array.isArray(preloadedCategories) && preloadedCategories.length > 0
     ? preloadedCategories
@@ -60,7 +61,9 @@ async function populateProductCategorySelects(selectedValues, preloadedCategorie
 
   const activeCategories = (categories || []).filter(function(category) { return category && category.isActive; });
   const activeNames = new Set(activeCategories.map(function(category) { return category.name; }));
-  const selects = document.querySelectorAll(".product-category-select");
+
+  // Eğer hedef belirtildiyse onu, yoksa hepsini seç (eski uyumluluk)
+  const selects = targetSelect ? [targetSelect] : document.querySelectorAll(".product-category-select");
 
   selects.forEach(function(select) {
     const preserved = desiredSelection.length > 0 ? desiredSelection : getSelectedCategories(select);
@@ -98,7 +101,11 @@ async function loadCategories() {
   const payload = await safeJson(res);
   const data = (payload && payload.data) ? payload.data : (payload || []);
 
-  await populateProductCategorySelects(undefined, data);
+  // ✅ Sadece "Yeni Ürün Ekle" formundaki select'i doldur
+  const addProductSelect = document.getElementById("addProductCategorySelect");
+  if (addProductSelect) {
+    await populateProductCategorySelects(undefined, data, addProductSelect);
+  }
 
   if (filterSelect) {
     filterSelect.innerHTML = "";
@@ -186,6 +193,8 @@ async function handleQuickSaveProduct(product, fields) {
   };
 
   fields.saveButton.disabled = true;
+  const originalText = fields.saveButton.textContent;
+  fields.saveButton.textContent = "Kaydediliyor...";
 
   try {
     const res = await fetch("/admin/api/products/" + id, {
@@ -199,19 +208,34 @@ async function handleQuickSaveProduct(product, fields) {
     const data = await safeJson(res);
     if (!res.ok) {
       alert("Güncelleme başarısız: " + ((data && data.error) ? data.error : res.statusText));
+      fields.saveButton.textContent = originalText;
       return;
     }
 
+    // Modeli güncelle
     const index = currentProducts.findIndex(function(item) { return getId(item) === id; });
     if (index >= 0 && data) {
       currentProducts[index] = data;
     }
 
-    renderProductList(currentProducts);
+    // ✅ DÜZELTME 3: Tabloyu yeniden çizmek yerine butonu güncelle.
+    // Bu sayede diğer satırlardaki veriler kaybolmaz ve odak bozulmaz.
+    fields.saveButton.textContent = "Kaydedildi ✓";
+    fields.saveButton.style.backgroundColor = "#166534"; // Yeşil renk
+    fields.saveButton.style.color = "white";
+
+    setTimeout(() => {
+        fields.saveButton.textContent = "Kaydet";
+        fields.saveButton.style.backgroundColor = ""; 
+        fields.saveButton.style.color = "";
+        fields.saveButton.disabled = false;
+    }, 2000);
+
     setProductStatus("Ürün güncellendi");
   } catch (err) {
+    console.error(err);
     alert("Güncelleme başarısız");
-  } finally {
+    fields.saveButton.textContent = originalText;
     fields.saveButton.disabled = false;
   }
 }
@@ -254,15 +278,19 @@ function renderProductList(data) {
       "</div>";
     info.onclick = function() { selectProduct(product); };
 
+    // --- Input Alanları ---
+
     const brandCell = document.createElement("td");
     const brandInput = document.createElement("input");
     brandInput.type = "text";
     brandInput.className = "table-input";
     brandInput.placeholder = "Marka";
     brandInput.value = product.brand || "";
-    brandInput.addEventListener("click", function(event) {
-      event.stopPropagation();
+    // ✅ DÜZELTME 2: Input değişince hafızadaki (currentProducts) veriyi de güncelle
+    brandInput.addEventListener("input", function(e) {
+        product.brand = e.target.value; 
     });
+    brandInput.addEventListener("click", function(event) { event.stopPropagation(); });
     brandCell.appendChild(brandInput);
 
     const barcodeCell = document.createElement("td");
@@ -271,9 +299,10 @@ function renderProductList(data) {
     barcodeInput.className = "table-input";
     barcodeInput.placeholder = "Barkod";
     barcodeInput.value = product.barcode || "";
-    barcodeInput.addEventListener("click", function(event) {
-      event.stopPropagation();
+    barcodeInput.addEventListener("input", function(e) {
+        product.barcode = e.target.value; 
     });
+    barcodeInput.addEventListener("click", function(event) { event.stopPropagation(); });
     barcodeCell.appendChild(barcodeInput);
 
     const stockCell = document.createElement("td");
@@ -284,10 +313,13 @@ function renderProductList(data) {
     stockInput.className = "table-input";
     stockInput.placeholder = "Stok";
     stockInput.value = stockValue === null ? "" : stockValue;
-    stockInput.addEventListener("click", function(event) {
-      event.stopPropagation();
+    stockInput.addEventListener("input", function(e) {
+        product.stock = e.target.value; 
     });
+    stockInput.addEventListener("click", function(event) { event.stopPropagation(); });
     stockCell.appendChild(stockInput);
+
+    // --- Kampanya Toggle ---
 
     const campaignCell = document.createElement("td");
     campaignCell.className = "campaign-cell";
@@ -296,14 +328,14 @@ function renderProductList(data) {
     campaignToggle.className = "campaign-toggle";
     campaignToggle.checked = !!product.isCampaign;
     campaignToggle.dataset.id = getId(product) || "";
-    campaignToggle.addEventListener("click", function(event) {
-      event.stopPropagation();
-    });
+    campaignToggle.addEventListener("click", function(event) { event.stopPropagation(); });
     campaignToggle.addEventListener("change", function(event) {
       event.stopPropagation();
       toggleCampaign(campaignToggle);
     });
     campaignCell.appendChild(campaignToggle);
+
+    // --- Butonlar ---
 
     const actions = document.createElement("td");
     actions.className = "inline-actions";
@@ -380,7 +412,11 @@ async function selectProduct(product) {
   document.getElementById("prodName").innerText = product.name || "-";
   document.getElementById("prodId").innerText = id ? ("(id: " + id + ")") : "(id yok)";
 
-  await populateProductCategorySelects(categories);
+  // ✅ Sadece Düzenleme Formunun Select'ini güncelle
+  const editSelect = document.getElementById("editProductCategorySelect");
+  if (editSelect) {
+    await populateProductCategorySelects(categories, undefined, editSelect);
+  }
 
   const form = document.getElementById("editProduct");
   form.elements.name.value = product.name || "";
