@@ -21,7 +21,7 @@ func EnsureProductIndexes(db *mongo.Database) error {
 			SetName("barcode_unique").
 			SetUnique(true).
 			SetPartialFilterExpression(bson.M{
-				"barcode": bson.M{"$exists": true, "$ne": ""},
+				"barcode": bson.M{"$exists": true},
 			}),
 	}
 
