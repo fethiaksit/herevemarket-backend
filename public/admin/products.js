@@ -38,6 +38,11 @@ function normalizeBarcode(value) {
   return String(value).trim();
 }
 
+function normalizeBrand(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
 async function populateProductCategorySelects(selectedValues, preloadedCategories) {
   const desiredSelection = normalizeCategoryValues(selectedValues);
   const categoryData = Array.isArray(preloadedCategories) && preloadedCategories.length > 0
@@ -159,6 +164,58 @@ async function toggleCampaign(checkbox) {
   }
 }
 
+async function handleQuickSaveProduct(product, fields) {
+  if (!product) return;
+
+  const id = getId(product);
+  if (!id) {
+    alert("Ürün id yok");
+    return;
+  }
+
+  const stock = parseStockValue(fields.stockInput.value);
+  if (stock === null) {
+    alert("Stok 0 veya daha büyük olmalı");
+    return;
+  }
+
+  const payload = {
+    stock: stock,
+    brand: normalizeBrand(fields.brandInput.value),
+    barcode: normalizeBarcode(fields.barcodeInput.value)
+  };
+
+  fields.saveButton.disabled = true;
+
+  try {
+    const res = await fetch("/admin/api/products/" + id, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify(payload)
+    });
+
+    if (handleUnauthorized(res)) return;
+
+    const data = await safeJson(res);
+    if (!res.ok) {
+      alert("Güncelleme başarısız: " + ((data && data.error) ? data.error : res.statusText));
+      return;
+    }
+
+    const index = currentProducts.findIndex(function(item) { return getId(item) === id; });
+    if (index >= 0 && data) {
+      currentProducts[index] = data;
+    }
+
+    renderProductList(currentProducts);
+    setProductStatus("Ürün güncellendi");
+  } catch (err) {
+    alert("Güncelleme başarısız");
+  } finally {
+    fields.saveButton.disabled = false;
+  }
+}
+
 function renderProductList(data) {
   const table = document.getElementById("productList");
   const tbody = table.querySelector("tbody");
@@ -198,21 +255,39 @@ function renderProductList(data) {
     info.onclick = function() { selectProduct(product); };
 
     const brandCell = document.createElement("td");
-    brandCell.textContent = product.brand || "-";
+    const brandInput = document.createElement("input");
+    brandInput.type = "text";
+    brandInput.className = "table-input";
+    brandInput.placeholder = "Marka";
+    brandInput.value = product.brand || "";
+    brandInput.addEventListener("click", function(event) {
+      event.stopPropagation();
+    });
+    brandCell.appendChild(brandInput);
 
     const barcodeCell = document.createElement("td");
-    barcodeCell.textContent = product.barcode || "-";
+    const barcodeInput = document.createElement("input");
+    barcodeInput.type = "text";
+    barcodeInput.className = "table-input";
+    barcodeInput.placeholder = "Barkod";
+    barcodeInput.value = product.barcode || "";
+    barcodeInput.addEventListener("click", function(event) {
+      event.stopPropagation();
+    });
+    barcodeCell.appendChild(barcodeInput);
 
     const stockCell = document.createElement("td");
-    const stockText = stockValue === null ? "-" : stockValue;
-    stockCell.textContent = stockText;
-    if (stockValue === 0) {
-      const badge = document.createElement("span");
-      badge.className = "badge out-of-stock";
-      badge.textContent = "Tükendi";
-      stockCell.textContent = "";
-      stockCell.appendChild(badge);
-    }
+    const stockInput = document.createElement("input");
+    stockInput.type = "number";
+    stockInput.min = "0";
+    stockInput.step = "1";
+    stockInput.className = "table-input";
+    stockInput.placeholder = "Stok";
+    stockInput.value = stockValue === null ? "" : stockValue;
+    stockInput.addEventListener("click", function(event) {
+      event.stopPropagation();
+    });
+    stockCell.appendChild(stockInput);
 
     const campaignCell = document.createElement("td");
     campaignCell.className = "campaign-cell";
@@ -233,6 +308,20 @@ function renderProductList(data) {
     const actions = document.createElement("td");
     actions.className = "inline-actions";
 
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "small";
+    saveBtn.textContent = "Kaydet";
+    saveBtn.onclick = function(ev) {
+      ev.stopPropagation();
+      handleQuickSaveProduct(product, {
+        brandInput: brandInput,
+        barcodeInput: barcodeInput,
+        stockInput: stockInput,
+        saveButton: saveBtn
+      });
+    };
+
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
     deleteBtn.className = "danger ghost small";
@@ -242,6 +331,7 @@ function renderProductList(data) {
       handleDeleteProduct(product);
     };
 
+    actions.appendChild(saveBtn);
     actions.appendChild(deleteBtn);
 
     row.appendChild(info);
