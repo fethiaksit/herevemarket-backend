@@ -13,26 +13,31 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+/*
+GET /products
+- Pagination OPSİYONEL
+- page + limit YOKSA → TÜM ÜRÜNLER
+*/
 func GetProducts(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		const route = "GET /products"
 		defer handlePanic(c, route)
 
-		log.Printf("[%s] hit with query: page=%s limit=%s category=%s search=%s", route, c.Query("page"), c.Query("limit"), c.Query("category"), c.Query("search"))
+		log.Printf(
+			"[%s] hit page=%s limit=%s category=%s search=%s",
+			route,
+			c.Query("page"),
+			c.Query("limit"),
+			c.Query("category"),
+			c.Query("search"),
+		)
 
 		if err := ensureDBConnection(c.Request.Context(), db); err != nil {
 			respondWithError(c, http.StatusServiceUnavailable, route, "database unavailable")
 			return
 		}
 
-		page, limit, err := parsePaginationParams(c.Query("page"), c.Query("limit"))
-		if err != nil {
-			respondWithError(c, http.StatusBadRequest, route, "invalid pagination params")
-			return
-		}
-
-		// Include products that are explicitly active as well as legacy entries
-		// where the isActive flag might be missing.
+		// BASE FILTER
 		filter := bson.M{
 			"isActive":  bson.M{"$ne": false},
 			"isDeleted": bson.M{"$ne": true},
@@ -47,9 +52,23 @@ func GetProducts(db *mongo.Database) gin.HandlerFunc {
 		}
 
 		findOptions := options.Find().
-			SetSkip((page - 1) * limit).
-			SetLimit(limit).
 			SetSort(bson.D{{Key: "createdAt", Value: -1}})
+
+		// 👉 Pagination SADECE page + limit varsa uygulanır
+		pageStr := c.Query("page")
+		limitStr := c.Query("limit")
+
+		if pageStr != "" && limitStr != "" {
+			page, limit, err := parsePaginationParams(pageStr, limitStr)
+			if err != nil {
+				respondWithError(c, http.StatusBadRequest, route, "invalid pagination params")
+				return
+			}
+
+			findOptions.
+				SetSkip((page - 1) * limit).
+				SetLimit(limit)
+		}
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
@@ -71,6 +90,12 @@ func GetProducts(db *mongo.Database) gin.HandlerFunc {
 		c.JSON(http.StatusOK, products)
 	}
 }
+
+/*
+GET /products/campaigns
+- Pagination ZORUNLU
+- response: data + pagination
+*/
 func GetCampaignProducts(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		page, limit, err := parsePaginationParams(c.Query("page"), c.Query("limit"))
@@ -90,7 +115,8 @@ func GetCampaignProducts(db *mongo.Database) gin.HandlerFunc {
 			SetLimit(limit).
 			SetSort(bson.D{{Key: "createdAt", Value: -1}})
 
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer cancel()
 
 		total, err := db.Collection("products").CountDocuments(ctx, filter)
 		if err != nil {
