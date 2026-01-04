@@ -20,7 +20,7 @@ func parsePaginationParams(pageStr, limitStr string) (int64, int64, error) {
 
 	if limitStr != "" {
 		l, err := strconv.ParseInt(limitStr, 10, 64)
-		if err != nil || l < 1 || l > 100 {
+		if err != nil || l < 1 {
 			return 0, 0, gin.Error{}
 		}
 		limit = l

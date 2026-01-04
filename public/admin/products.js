@@ -4,6 +4,7 @@ let selectedProduct = null;
 let currentProducts = [];
 let currentPage = 1;
 let totalPages = 1;
+let totalCount = 0;
 const pageSize = 20;
 
 function setProductStatus(text) {
@@ -153,6 +154,11 @@ function renderPagination() {
   if (!container) return;
 
   container.innerHTML = "";
+
+  const label = document.createElement("span");
+  label.className = "pagination-label";
+  label.textContent = "Sayfa " + currentPage + " / " + totalPages;
+  container.appendChild(label);
 
   if (totalPages <= 1) {
     return;
@@ -457,8 +463,13 @@ async function loadProducts(page) {
 
   const products = (payload && payload.products) ? payload.products : (payload && payload.data) ? payload.data : (payload || []);
   currentProducts = Array.isArray(products) ? products : [];
-  currentPage = (payload && Number.isFinite(payload.page)) ? payload.page : targetPage;
-  totalPages = (payload && Number.isFinite(payload.totalPages)) ? payload.totalPages : 1;
+  const pagination = (payload && payload.pagination) ? payload.pagination : {};
+  currentPage = (pagination && Number.isFinite(pagination.page)) ? pagination.page : targetPage;
+  totalPages = (pagination && Number.isFinite(pagination.totalPages)) ? pagination.totalPages : 1;
+  if (totalPages < 1) {
+    totalPages = 1;
+  }
+  totalCount = (pagination && Number.isFinite(pagination.total)) ? pagination.total : currentProducts.length;
 
   renderProductList(currentProducts);
   renderPagination();
