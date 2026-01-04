@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -86,9 +87,7 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
-		filter := bson.M{
-			"isDeleted": bson.M{"$ne": true},
-		}
+		filter := bson.M{}
 
 		if category := strings.TrimSpace(c.Query("category")); category != "" {
 			filter["category"] = bson.M{"$in": []string{category}}
@@ -108,6 +107,10 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
+		}
+		totalPages := int64(0)
+		if total > 0 {
+			totalPages = int64(math.Ceil(float64(total) / float64(limit)))
 		}
 
 		opts := options.Find().
@@ -129,12 +132,10 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"data": products,
-			"pagination": gin.H{
-				"page":  page,
-				"limit": limit,
-				"total": total,
-			},
+			"products":   products,
+			"total":      total,
+			"page":       page,
+			"totalPages": totalPages,
 		})
 	}
 }
