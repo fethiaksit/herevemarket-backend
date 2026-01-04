@@ -157,12 +157,8 @@ function renderPagination() {
 
   const label = document.createElement("span");
   label.className = "pagination-label";
-  label.textContent = "Sayfa " + currentPage + " / " + totalPages;
+  label.textContent = "Page " + currentPage + " / " + totalPages;
   container.appendChild(label);
-
-  if (totalPages <= 1) {
-    return;
-  }
 
   const addButton = function(label, page, disabled) {
     const button = document.createElement("button");
@@ -176,13 +172,8 @@ function renderPagination() {
     container.appendChild(button);
   };
 
-  // Kısa sayfalama kontrolü (Önceki / Sayfalar / Sonraki)
+  // Kısa sayfalama kontrolü (Önceki / Sonraki)
   addButton("Önceki", currentPage - 1, currentPage <= 1);
-
-  for (let page = 1; page <= totalPages; page += 1) {
-    addButton(String(page), page, page === currentPage);
-  }
-
   addButton("Sonraki", currentPage + 1, currentPage >= totalPages);
 }
 
@@ -461,14 +452,11 @@ async function loadProducts(page) {
     return;
   }
 
-  const products = (payload && payload.products) ? payload.products : (payload && payload.data) ? payload.data : (payload || []);
-  currentProducts = Array.isArray(products) ? products : [];
+  const data = (payload && payload.data) ? payload.data : [];
+  currentProducts = Array.isArray(data) ? data : [];
   const pagination = (payload && payload.pagination) ? payload.pagination : {};
   currentPage = (pagination && Number.isFinite(pagination.page)) ? pagination.page : targetPage;
   totalPages = (pagination && Number.isFinite(pagination.totalPages)) ? pagination.totalPages : 1;
-  if (totalPages < 1) {
-    totalPages = 1;
-  }
   totalCount = (pagination && Number.isFinite(pagination.total)) ? pagination.total : currentProducts.length;
 
   renderProductList(currentProducts);
