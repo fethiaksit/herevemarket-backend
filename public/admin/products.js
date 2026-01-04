@@ -2,6 +2,9 @@ requireAuth();
 
 let selectedProduct = null;
 let currentProducts = [];
+let currentPage = 1;
+let totalPages = 1;
+const pageSize = 20;
 
 function setProductStatus(text) {
   setText("productStatus", text || "");
@@ -129,6 +132,52 @@ async function loadCategories() {
     const exists = (data || []).some(function(category){ return category.name === preserved; });
     filterSelect.value = exists ? preserved : "";
   }
+}
+
+function buildProductsUrl(page) {
+  const selected = document.getElementById("categoryFilter").value;
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(pageSize)
+  });
+
+  if (selected) {
+    params.set("category", selected);
+  }
+
+  return "/admin/api/products?" + params.toString();
+}
+
+function renderPagination() {
+  const container = document.getElementById("productPagination");
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  if (totalPages <= 1) {
+    return;
+  }
+
+  const addButton = function(label, page, disabled) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.disabled = disabled;
+    button.addEventListener("click", function() {
+      if (page === currentPage) return;
+      loadProducts(page);
+    });
+    container.appendChild(button);
+  };
+
+  // Kısa sayfalama kontrolü (Önceki / Sayfalar / Sonraki)
+  addButton("Önceki", currentPage - 1, currentPage <= 1);
+
+  for (let page = 1; page <= totalPages; page += 1) {
+    addButton(String(page), page, page === currentPage);
+  }
+
+  addButton("Sonraki", currentPage + 1, currentPage >= totalPages);
 }
 
 async function toggleCampaign(checkbox) {
@@ -392,13 +441,9 @@ function renderProductList(data) {
   });
 }
 
-async function loadProducts() {
-  const selected = document.getElementById("categoryFilter").value;
-  let url = "/admin/api/products";
-
-  if (selected) {
-    url += "?" + new URLSearchParams({ category: selected }).toString();
-  }
+async function loadProducts(page) {
+  const targetPage = page || 1;
+  const url = buildProductsUrl(targetPage);
 
   setProductStatus("Ürünler yükleniyor...");
 
@@ -410,10 +455,13 @@ async function loadProducts() {
     return;
   }
 
-  const data = (payload && payload.data) ? payload.data : (payload || []);
-  currentProducts = Array.isArray(data) ? data : [];
+  const products = (payload && payload.products) ? payload.products : (payload && payload.data) ? payload.data : (payload || []);
+  currentProducts = Array.isArray(products) ? products : [];
+  currentPage = (payload && Number.isFinite(payload.page)) ? payload.page : targetPage;
+  totalPages = (payload && Number.isFinite(payload.totalPages)) ? payload.totalPages : 1;
 
   renderProductList(currentProducts);
+  renderPagination();
   setProductStatus("");
 }
 
@@ -469,18 +517,19 @@ async function handleDeleteProduct(product) {
     return;
   }
 
-  currentProducts = currentProducts.filter(function(item) { return getId(item) !== id; });
   if (selectedProduct && getId(selectedProduct) === id) {
     selectedProduct = null;
     document.getElementById("editProduct").style.display = "none";
   }
 
-  renderProductList(currentProducts);
-  setProductStatus("Ürün silindi");
+  // Soft delete sonrası listeyi sayfalama ile yenile
+  await loadProducts(currentPage);
+  setProductStatus("Ürün pasifleştirildi");
 }
 
 document.getElementById("categoryFilter").addEventListener("change", function() {
-  loadProducts();
+  currentPage = 1;
+  loadProducts(currentPage);
 });
 
 document.getElementById("addProduct").addEventListener("submit", async function(event) {
@@ -536,7 +585,7 @@ document.getElementById("addProduct").addEventListener("submit", async function(
   if (handleUnauthorized(res)) return;
 
   event.target.reset();
-  loadProducts();
+  loadProducts(currentPage);
 });
 
 document.getElementById("editProduct").addEventListener("submit", async function(event) {
@@ -598,7 +647,7 @@ document.getElementById("editProduct").addEventListener("submit", async function
   }
   if (handleUnauthorized(res)) return;
 
-  loadProducts();
+  loadProducts(currentPage);
 });
 
 document.getElementById("deleteProduct").addEventListener("click", async function() {
@@ -608,4 +657,4 @@ document.getElementById("deleteProduct").addEventListener("click", async functio
 });
 
 loadCategories();
-loadProducts();
+loadProducts(currentPage);
