@@ -87,7 +87,9 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
-		filter := bson.M{}
+		filter := bson.M{
+			"isDeleted": bson.M{"$ne": true},
+		}
 
 		if category := strings.TrimSpace(c.Query("category")); category != "" {
 			filter["category"] = bson.M{"$in": []string{category}}
@@ -132,10 +134,13 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"products":   products,
-			"total":      total,
-			"page":       page,
-			"totalPages": totalPages,
+			"data": products,
+			"pagination": gin.H{
+				"page":       page,
+				"limit":      limit,
+				"total":      total,
+				"totalPages": totalPages,
+			},
 		})
 	}
 }
