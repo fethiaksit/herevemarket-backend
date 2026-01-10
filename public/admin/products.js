@@ -52,6 +52,29 @@ function normalizeDescription(value) {
   return String(value).trim();
 }
 
+function buildProductFormData(values) {
+  const formData = new FormData();
+  formData.set("name", values.name);
+  formData.set("price", String(values.price));
+  formData.set("brand", values.brand || "");
+  formData.set("barcode", values.barcode || "");
+  formData.set("description", values.description || "");
+  formData.set("stock", String(values.stock));
+  values.categories.forEach(function(category) {
+    formData.append("category", category);
+  });
+  if (values.isCampaign !== undefined) {
+    formData.set("isCampaign", values.isCampaign ? "true" : "false");
+  }
+  if (values.isActive !== undefined) {
+    formData.set("isActive", values.isActive ? "true" : "false");
+  }
+  if (values.imageFile) {
+    formData.set("image", values.imageFile, values.imageFile.name);
+  }
+  return formData;
+}
+
 // ✅ DÜZELTME 1: targetSelect parametresi eklendi. Sadece istenen kutuyu günceller.
 async function populateProductCategorySelects(selectedValues, preloadedCategories, targetSelect) {
   const desiredSelection = normalizeCategoryValues(selectedValues);
@@ -554,26 +577,32 @@ document.getElementById("addProduct").addEventListener("submit", async function(
   }
 
   const barcode = normalizeBarcode(form.get("barcode"));
+  const imageInput = event.target.querySelector('input[name="image"]');
+  const imageFile = imageInput && imageInput.files ? imageInput.files[0] : null;
+  if (!imageFile) {
+    alert("Görsel seçmelisiniz");
+    return;
+  }
 
-  const createPayload = {
+  const createPayload = buildProductFormData({
     name: form.get("name"),
     price: price,
-    brand: form.get("brand"),
+    brand: normalizeBrand(form.get("brand")),
     barcode: barcode,
     description: normalizeDescription(form.get("description")),
     stock: stock,
-    category: categories,
-    imageUrl: form.get("imageUrl"),
+    categories: categories,
+    imageFile: imageFile,
     isCampaign: form.get("isCampaign") === "on",
     isActive: true
-  };
+  });
 
   console.log("Create product payload:", createPayload);
 
   const res = await fetch("/admin/api/products", {
     method: "POST",
-    headers: authHeaders(),
-    body: JSON.stringify(createPayload)
+    headers: { "Authorization": "Bearer " + getToken() },
+    body: createPayload
   });
   console.log("Create product response status:", res.status);
   const createBody = await safeJson(res);
@@ -617,26 +646,28 @@ document.getElementById("editProduct").addEventListener("submit", async function
   }
 
   const barcode = normalizeBarcode(form.get("barcode"));
+  const imageInput = event.target.querySelector('input[name="image"]');
+  const imageFile = imageInput && imageInput.files ? imageInput.files[0] : null;
 
-  const updatePayload = {
+  const updatePayload = buildProductFormData({
     name: form.get("name"),
     price: price,
-    brand: form.get("brand"),
+    brand: normalizeBrand(form.get("brand")),
     barcode: barcode,
     description: normalizeDescription(form.get("description")),
     stock: stock,
-    category: categories,
-    imageUrl: form.get("imageUrl"),
+    categories: categories,
+    imageFile: imageFile,
     isCampaign: form.get("isCampaign") === "on",
     isActive: form.get("isActive") === "on"
-  };
+  });
 
   console.log("Update product payload:", updatePayload);
 
   const res = await fetch("/admin/api/products/" + id, {
     method: "PUT",
-    headers: authHeaders(),
-    body: JSON.stringify(updatePayload)
+    headers: { "Authorization": "Bearer " + getToken() },
+    body: updatePayload
   });
   console.log("Update product response status:", res.status);
   const updateBody = await safeJson(res);
