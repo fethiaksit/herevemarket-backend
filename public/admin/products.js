@@ -152,7 +152,7 @@ async function populateProductCategorySelects(selectedValues, preloadedCategorie
       ? previousSelection
       : mapCategoryNamesToIds(previousSelection, activeCategories);
     select.innerHTML = "";
-    select.multiple = true;
+    select.multiple = select.hasAttribute("multiple");
 
     const def = document.createElement("option");
     def.value = "";
@@ -601,28 +601,42 @@ document.getElementById("categoryFilter").addEventListener("change", function() 
   loadProducts(currentPage);
 });
 
-function getRequiredCategoryId(select) {
+function getCreateCategoryId(form) {
+  const select = form.querySelector('select[name="category_id"]');
   if (!select) {
     throw new Error("Kategori seçimi bulunamadı");
   }
-  if (!select.hasAttribute("name")) {
-    throw new Error("Kategori seçimi için name attribute eksik");
-  }
-  if (!select.querySelector("option[value]")) {
-    throw new Error("Kategori seçeneklerinde value attribute eksik");
-  }
-  const value = select.value;
-  if (value === undefined || value === null || value === "") {
+  const value = String(select.value || "").trim();
+  if (!value) {
     throw new Error("category_id required");
   }
   return value;
 }
 
-function logFormData(formData) {
+function logCreateFormData(formData) {
   console.log("FormData entries:");
   for (const pair of formData.entries()) {
     console.log("FORMDATA:", pair[0], pair[1]);
   }
+}
+
+function buildCreateProductFormData(form) {
+  const formData = new FormData(form);
+  const categoryId = getCreateCategoryId(form);
+  formData.set("category_id", categoryId);
+
+  const imageInput = form.querySelector('input[name="image"]');
+  const files = imageInput && imageInput.files ? Array.from(imageInput.files) : [];
+  if (files.length === 0) {
+    formData.delete("image");
+  } else {
+    formData.delete("image");
+    files.forEach(function(file) {
+      formData.append("image", file, file.name);
+    });
+  }
+
+  return formData;
 }
 
 function initProductCreate() {
@@ -632,31 +646,15 @@ function initProductCreate() {
   form.addEventListener("submit", async function(event) {
     event.preventDefault();
 
-    const categorySelect = form.querySelector('select[name="category"]');
-    let categoryId;
+    let formData;
     try {
-      categoryId = getRequiredCategoryId(categorySelect);
+      formData = buildCreateProductFormData(form);
     } catch (err) {
       alert(err.message || "Kategori seçimi geçersiz");
       return;
     }
 
-    const imageInput = form.querySelector('input[name="image"]');
-    const imageFile = imageInput?.files?.[0];
-    if (!imageFile) {
-      alert("Ürün görseli yükle");
-      return;
-    }
-
-    const formData = new FormData(form);
-    if (!categoryId) {
-      throw new Error("category_id required");
-    }
-    formData.set("category_id", categoryId);
-    if (!formData.get("category_id")) {
-      throw new Error("category_id required");
-    }
-    logFormData(formData);
+    logCreateFormData(formData);
 
     const res = await fetch("/admin/api/products", {
       method: "POST",
