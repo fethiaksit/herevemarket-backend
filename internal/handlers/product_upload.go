@@ -14,7 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-type productFormInput struct {
+type MultipartProductInput struct {
 	Name           string
 	NameSet        bool
 	Price          float64
@@ -37,127 +37,111 @@ type productFormInput struct {
 	IsCampaignSet  bool
 }
 
-func parseMultipartProductRequest(c *gin.Context) (productFormInput, error) {
-	reader, err := c.Request.MultipartReader()
-	if err != nil {
-		return productFormInput{}, err
+func parseMultipartProductRequest(c *gin.Context) (MultipartProductInput, error) {
+	if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
+		return MultipartProductInput{}, err
 	}
 
-	input := productFormInput{}
+	input := MultipartProductInput{}
 
-	for {
-		part, err := reader.NextPart()
-		if errors.Is(err, io.EOF) {
-			break
-		}
+	if value, ok := c.GetPostForm("name"); ok {
+		input.Name = value
+		input.NameSet = true
+	}
+
+	if value, ok := c.GetPostForm("price"); ok {
+		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {
-			return productFormInput{}, err
+			return MultipartProductInput{}, err
 		}
+		input.Price = parsed
+		input.PriceSet = true
+	}
 
-		name := part.FormName()
-		if name == "" {
-			continue
-		}
+	categoryIDs := c.PostFormArray("category_id")
+	if _, ok := c.Request.MultipartForm.Value["category_id"]; ok {
+		input.CategoryIDs = categoryIDs
+		input.CategoryIDSet = true
+	}
 
-		if part.FileName() != "" {
-			if name != "image" {
-				if _, err := io.Copy(io.Discard, part); err != nil {
-					return productFormInput{}, err
-				}
-				continue
-			}
+	if value, ok := c.GetPostForm("description"); ok {
+		input.Description = value
+		input.DescriptionSet = true
+	}
 
-			imagePath, err := saveImagePart(part)
-			if err != nil {
-				return productFormInput{}, err
-			}
-			input.ImagePath = imagePath
-			input.ImageSet = true
-			continue
-		}
+	if value, ok := c.GetPostForm("barcode"); ok {
+		input.Barcode = value
+		input.BarcodeSet = true
+	}
 
-		value, err := readStringPart(part)
+	if value, ok := c.GetPostForm("brand"); ok {
+		input.Brand = value
+		input.BrandSet = true
+	}
+
+	if value, ok := c.GetPostForm("stock"); ok {
+		parsed, err := strconv.Atoi(value)
 		if err != nil {
-			return productFormInput{}, err
+			return MultipartProductInput{}, err
 		}
+		input.Stock = parsed
+		input.StockSet = true
+	}
 
-		switch name {
-		case "name":
-			input.Name = value
-			input.NameSet = true
-		case "price":
-			parsed, err := strconv.ParseFloat(value, 64)
-			if err != nil {
-				return productFormInput{}, err
-			}
-			input.Price = parsed
-			input.PriceSet = true
-		case "category_id":
-			if value != "" {
-				input.CategoryIDs = append(input.CategoryIDs, value)
-			}
-			input.CategoryIDSet = true
-		case "image_url", "imageUrl":
-			continue
-		case "description":
-			input.Description = value
-			input.DescriptionSet = true
-		case "barcode":
-			input.Barcode = value
-			input.BarcodeSet = true
-		case "brand":
-			input.Brand = value
-			input.BrandSet = true
-		case "stock":
-			parsed, err := strconv.Atoi(value)
-			if err != nil {
-				return productFormInput{}, err
-			}
-			input.Stock = parsed
-			input.StockSet = true
-		case "isActive":
-			parsed, err := parseBoolValue(value)
-			if err != nil {
-				return productFormInput{}, err
-			}
-			input.IsActive = parsed
-			input.IsActiveSet = true
-		case "isCampaign":
-			parsed, err := parseBoolValue(value)
-			if err != nil {
-				return productFormInput{}, err
-			}
-			input.IsCampaign = parsed
-			input.IsCampaignSet = true
+	if value, ok := c.GetPostForm("isActive"); ok {
+		parsed, err := parseBoolValue(value)
+		if err != nil {
+			return MultipartProductInput{}, err
 		}
+		input.IsActive = parsed
+		input.IsActiveSet = true
+	}
+
+	if value, ok := c.GetPostForm("isCampaign"); ok {
+		parsed, err := parseBoolValue(value)
+		if err != nil {
+			return MultipartProductInput{}, err
+		}
+		input.IsCampaign = parsed
+		input.IsCampaignSet = true
+	}
+
+	file, err := c.FormFile("image")
+	if err == nil {
+		imagePath, err := saveImage(file)
+		if err != nil {
+			return MultipartProductInput{}, err
+		}
+		input.ImagePath = imagePath
+		input.ImageSet = true
+	} else if !errors.Is(err, http.ErrMissingFile) {
+		return MultipartProductInput{}, err
 	}
 
 	return input, nil
 }
 
-func readStringPart(part *multipart.Part) (string, error) {
-	data, err := io.ReadAll(part)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
-}
-
-func saveImagePart(part *multipart.Part) (string, error) {
-	extension := strings.ToLower(filepath.Ext(part.FileName()))
+func saveImage(file *multipart.FileHeader) (string, error) {
+	extension := strings.ToLower(filepath.Ext(file.Filename))
 	filename := primitive.NewObjectID().Hex() + extension
 	dir := filepath.Join("public", "uploads", "products")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	path := filepath.Join(dir, filename)
-	file, err := os.Create(path)
+	output, err := os.Create(path)
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer output.Close()
 
-	if _, err := io.Copy(file, part); err != nil {
+	input, err := file.Open()
+	if err != nil {
+		return "", err
+	}
+	defer input.Close()
+
+	if _, err := io.Copy(output, input); err != nil {
 		return "", err
 	}
 
