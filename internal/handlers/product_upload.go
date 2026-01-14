@@ -5,10 +5,13 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type productFormInput struct {
@@ -24,6 +27,8 @@ type productFormInput struct {
 	BarcodeSet     bool
 	Brand          string
 	BrandSet       bool
+	ImagePath      string
+	ImageSet       bool
 	Stock          int
 	StockSet       bool
 	IsActive       bool
@@ -55,9 +60,19 @@ func parseMultipartProductRequest(c *gin.Context) (productFormInput, error) {
 		}
 
 		if part.FileName() != "" {
-			if _, err := io.Copy(io.Discard, part); err != nil {
+			if name != "image" {
+				if _, err := io.Copy(io.Discard, part); err != nil {
+					return productFormInput{}, err
+				}
+				continue
+			}
+
+			imagePath, err := saveImagePart(part)
+			if err != nil {
 				return productFormInput{}, err
 			}
+			input.ImagePath = imagePath
+			input.ImageSet = true
 			continue
 		}
 
@@ -82,6 +97,8 @@ func parseMultipartProductRequest(c *gin.Context) (productFormInput, error) {
 				input.CategoryIDs = append(input.CategoryIDs, value)
 			}
 			input.CategoryIDSet = true
+		case "image_url", "imageUrl":
+			continue
 		case "description":
 			input.Description = value
 			input.DescriptionSet = true
@@ -124,6 +141,27 @@ func readStringPart(part *multipart.Part) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(data)), nil
+}
+
+func saveImagePart(part *multipart.Part) (string, error) {
+	extension := strings.ToLower(filepath.Ext(part.FileName()))
+	filename := primitive.NewObjectID().Hex() + extension
+	dir := filepath.Join("public", "uploads", "products")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, filename)
+	file, err := os.Create(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	if _, err := io.Copy(file, part); err != nil {
+		return "", err
+	}
+
+	return filepath.ToSlash(filepath.Join("uploads", "products", filename)), nil
 }
 
 func parseBoolValue(value string) (bool, error) {

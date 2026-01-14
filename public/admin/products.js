@@ -67,19 +67,27 @@ function mapCategoryNamesToIds(values, categories) {
     .filter(function(value) { return !!value; });
 }
 
-function buildProductPayload(values) {
-  const payload = {
-    name: values.name,
-    price: values.price,
-    category_id: values.categoryIds,
-    stock: values.stock,
-    brand: values.brand || "",
-    barcode: values.barcode || "",
-    description: values.description || ""
-  };
-  if (values.isCampaign !== undefined) payload.isCampaign = values.isCampaign;
-  if (values.isActive !== undefined) payload.isActive = values.isActive;
-  return payload;
+function buildProductFormData(values) {
+  const formData = new FormData();
+  formData.set("name", values.name);
+  formData.set("price", String(values.price));
+  formData.set("stock", String(values.stock));
+  formData.set("brand", values.brand || "");
+  formData.set("barcode", values.barcode || "");
+  formData.set("description", values.description || "");
+  values.categoryIds.forEach(function(categoryId) {
+    formData.append("category_id", categoryId);
+  });
+  if (values.isCampaign !== undefined) {
+    formData.set("isCampaign", values.isCampaign ? "true" : "false");
+  }
+  if (values.isActive !== undefined) {
+    formData.set("isActive", values.isActive ? "true" : "false");
+  }
+  if (values.imageFile) {
+    formData.set("image", values.imageFile, values.imageFile.name);
+  }
+  return formData;
 }
 
 // ✅ DÜZELTME 1: targetSelect parametresi eklendi. Sadece istenen kutuyu günceller.
@@ -594,6 +602,7 @@ document.getElementById("addProduct").addEventListener("submit", async function(
     description: normalizeDescription(form.get("description")),
     stock: stock,
     categoryIds: categories,
+    imageFile: imageFile,
     isCampaign: form.get("isCampaign") === "on",
     isActive: true
   });
@@ -647,7 +656,9 @@ document.getElementById("editProduct").addEventListener("submit", async function
   }
 
   const barcode = normalizeBarcode(form.get("barcode"));
-  const updatePayload = buildProductPayload({
+  const imageInput = event.target.querySelector('input[name="image"]');
+  const imageFile = imageInput && imageInput.files ? imageInput.files[0] : null;
+  const updatePayload = buildProductFormData({
     name: form.get("name"),
     price: price,
     brand: normalizeBrand(form.get("brand")),
@@ -655,6 +666,7 @@ document.getElementById("editProduct").addEventListener("submit", async function
     description: normalizeDescription(form.get("description")),
     stock: stock,
     categoryIds: categories,
+    imageFile: imageFile,
     isCampaign: form.get("isCampaign") === "on",
     isActive: form.get("isActive") === "on"
   });

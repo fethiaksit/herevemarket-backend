@@ -14,6 +14,7 @@ type Product struct {
 	Description string             `bson:"description,omitempty" json:"description,omitempty"`
 	Barcode     string             `bson:"barcode,omitempty" json:"barcode,omitempty"`
 	Brand       string             `bson:"brand,omitempty" json:"brand,omitempty"`
+	ImagePath   string             `bson:"imagePath,omitempty" json:"imagePath,omitempty"`
 	Stock       int                `bson:"stock" json:"stock"`
 	InStock     bool               `bson:"-" json:"inStock"`
 	IsActive    bool               `bson:"isActive" json:"isActive"`
