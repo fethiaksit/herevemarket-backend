@@ -32,6 +32,32 @@ function getSelectedCategories(select) {
     .filter(function(value) { return !!value; });
 }
 
+function validateCategorySelect(select) {
+  if (!select) {
+    alert("Kategori seçimi bulunamadı");
+    return { isValid: false, values: [] };
+  }
+
+  const options = Array.from(select.options || []);
+  const missingValueAttribute = options.some(function(option) {
+    return !option.hasAttribute("value");
+  });
+
+  if (missingValueAttribute) {
+    alert("Kategori seçeneklerinde value attribute eksik");
+    return { isValid: false, values: [] };
+  }
+
+  const values = getSelectedCategories(select);
+  console.log("Selected category values:", values);
+  if (values.length === 0) {
+    alert("En az bir kategori seç");
+    return { isValid: false, values: [] };
+  }
+
+  return { isValid: true, values: values };
+}
+
 function parseStockValue(value) {
   const stock = Number(value);
   if (!Number.isFinite(stock) || stock < 0) return null;
@@ -90,6 +116,10 @@ function buildUpdateProductFormData(values) {
   }
   if (values.imageFile) {
     formData.set("image", values.imageFile, values.imageFile.name);
+  }
+  console.log("FormData entries:");
+  for (const pair of formData.entries()) {
+    console.log("FORMDATA:", pair[0], pair[1]);
   }
   return formData;
 }
