@@ -575,27 +575,20 @@ document.getElementById("addProduct").addEventListener("submit", async function(
   event.preventDefault();
 
   const form = new FormData(event.target);
-  const price = parseFloat(form.get("price"));
-  if (Number.isNaN(price)) {
-    alert("Fiyat sayı olmalı (örn 24.90)");
-    return;
-  }
 
-  const stock = parseStockValue(form.get("stock"));
-  if (stock === null) {
-    alert("Stok 0 veya daha büyük olmalı");
-    return;
-  }
+  const categories = getSelectedCategories(
+    document.getElementById("addProductCategorySelect")
+  );
 
-  const categories = getSelectedCategories(event.target.querySelector('select[name="category"]'));
+  console.log("SELECTED CATEGORIES:", categories);
+
   if (categories.length === 0) {
     alert("En az bir kategori seç");
     return;
   }
 
-  const barcode = normalizeBarcode(form.get("barcode"));
   const imageInput = event.target.querySelector('input[name="image"]');
-  const imageFile = imageInput && imageInput.files ? imageInput.files[0] : null;
+  const imageFile = imageInput?.files?.[0];
   if (!imageFile) {
     alert("Ürün görseli yükle");
     return;
@@ -603,35 +596,33 @@ document.getElementById("addProduct").addEventListener("submit", async function(
 
   const createPayload = buildProductFormData({
     name: form.get("name"),
-    price: price,
-    brand: normalizeBrand(form.get("brand")),
-    barcode: barcode,
-    description: normalizeDescription(form.get("description")),
-    stock: stock,
-    categoryIds: categories,
+    price: parseFloat(form.get("price")),
+    brand: form.get("brand"),
+    barcode: form.get("barcode"),
+    description: form.get("description"),
+    stock: parseInt(form.get("stock"), 10),
+    categoryIds: categories, // 🔥 ARTIK BOŞ DEĞİL
     imageFile: imageFile,
     isCampaign: form.get("isCampaign") === "on",
     isActive: true
   });
 
-  console.log("Create product payload:", createPayload);
+  for (const pair of createPayload.entries()) {
+    console.log("FORMDATA:", pair[0], pair[1]);
+  }
 
   const res = await fetch("/admin/api/products", {
     method: "POST",
-    headers: authHeadersMultipart(),
+    headers: {
+      Authorization: authToken()
+    },
     body: createPayload
   });
-  console.log("Create product response status:", res.status);
-  const createBody = await safeJson(res);
-  console.log("Create product response body:", createBody);
-  if (!res.ok) {
-    console.error("Create product failed:", createBody || res.statusText);
-  }
-  if (handleUnauthorized(res)) return;
 
-  event.target.reset();
-  loadProducts(currentPage);
+  const body = await safeJson(res);
+  console.log("Create product response:", res.status, body);
 });
+
 
 document.getElementById("editProduct").addEventListener("submit", async function(event) {
   event.preventDefault();
