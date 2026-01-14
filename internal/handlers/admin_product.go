@@ -192,8 +192,12 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 ======================= */
 
 func CreateProduct(db *mongo.Database) gin.HandlerFunc {
+
 	return func(c *gin.Context) {
 		log.Println("CreateProduct: request received")
+		log.Println("=== CREATE PRODUCT HIT ===")
+		log.Println("Content-Type:", c.GetHeader("Content-Type"))
+		log.Println("Form:", c.Request.MultipartForm)
 		if !strings.HasPrefix(c.GetHeader("Content-Type"), "multipart/form-data") {
 			c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "multipart/form-data required"})
 			return

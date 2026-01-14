@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -51,6 +52,7 @@ type MultipartProductInput struct {
 
 func parseMultipartProductRequest(c *gin.Context) (MultipartProductInput, error) {
 	if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
+		log.Println("PARSE ERROR:", err)
 		return MultipartProductInput{}, err
 	}
 
