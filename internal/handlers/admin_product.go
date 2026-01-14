@@ -151,7 +151,7 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log.Println("CreateProduct: request received")
 		if strings.HasPrefix(c.GetHeader("Content-Type"), "multipart/form-data") {
-			input, err := parseMultipartProductRequest(c, false)
+			input, err := parseMultipartProductRequest(c)
 			if err != nil {
 				log.Println("CreateProduct multipart error:", err)
 				respondMultipartError(c, err)
@@ -351,7 +351,7 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 		log.Println("UpdateProduct request received for id:", id.Hex())
 
 		if strings.HasPrefix(c.GetHeader("Content-Type"), "multipart/form-data") {
-			input, err := parseMultipartProductRequest(c, false)
+			input, err := parseMultipartProductRequest(c)
 			if err != nil {
 				log.Println("UpdateProduct multipart error:", err)
 				respondMultipartError(c, err)
