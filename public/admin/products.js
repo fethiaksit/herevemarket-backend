@@ -67,7 +67,7 @@ function mapCategoryNamesToIds(values, categories) {
     .filter(function(value) { return !!value; });
 }
 
-function buildProductFormData(values) {
+function buildUpdateProductFormData(values) {
   const formData = new FormData();
   formData.set("name", values.name);
   formData.set("price", String(values.price));
@@ -75,7 +75,11 @@ function buildProductFormData(values) {
   formData.set("brand", values.brand || "");
   formData.set("barcode", values.barcode || "");
   formData.set("description", values.description || "");
-  values.categoryIds.forEach(function(categoryId) {
+  const categoryIds = normalizeCategoryValues(values.categoryIds);
+  if (categoryIds.length === 0) {
+    throw new Error("category_id required");
+  }
+  categoryIds.forEach(function(categoryId) {
     formData.append("category_id", categoryId);
   });
   if (values.isCampaign !== undefined) {
@@ -567,58 +571,73 @@ document.getElementById("categoryFilter").addEventListener("change", function() 
   loadProducts(currentPage);
 });
 
-document.getElementById("addProduct").addEventListener("submit", async function(event) {
-  event.preventDefault();
-
-  const form = new FormData(event.target);
-
-  const categories = getSelectedCategories(
-    document.getElementById("addProductCategorySelect")
-  );
-
-  console.log("SELECTED CATEGORIES:", categories);
-
-  if (categories.length === 0) {
-    alert("En az bir kategori seç");
-    return;
+function getRequiredCategoryId(select) {
+  if (!select) {
+    throw new Error("Kategori seçimi bulunamadı");
   }
-
-  const imageInput = event.target.querySelector('input[name="image"]');
-  const imageFile = imageInput?.files?.[0];
-  if (!imageFile) {
-    alert("Ürün görseli yükle");
-    return;
+  if (!select.hasAttribute("name")) {
+    throw new Error("Kategori seçimi için name attribute eksik");
   }
+  if (!select.querySelector("option[value]")) {
+    throw new Error("Kategori seçeneklerinde value attribute eksik");
+  }
+  const value = select.value;
+  if (value === undefined || value === null || value === "") {
+    throw new Error("category_id required");
+  }
+  return value;
+}
 
-  const createPayload = buildProductFormData({
-    name: form.get("name"),
-    price: parseFloat(form.get("price")),
-    brand: form.get("brand"),
-    barcode: form.get("barcode"),
-    description: form.get("description"),
-    stock: parseInt(form.get("stock"), 10),
-    categoryIds: categories, // 🔥 ARTIK BOŞ DEĞİL
-    imageFile: imageFile,
-    isCampaign: form.get("isCampaign") === "on",
-    isActive: true
-  });
-
-  console.log("Gönderilen Veri:", createPayload);
-  for (const pair of createPayload.entries()) {
+function logFormData(formData) {
+  console.log("FormData entries:");
+  for (const pair of formData.entries()) {
     console.log("FORMDATA:", pair[0], pair[1]);
   }
+}
 
-  const res = await fetch("/admin/api/products", {
-    method: "POST",
-    headers: {
-      Authorization: authToken()
-    },
-    body: createPayload
+function initProductCreate() {
+  const form = document.getElementById("addProduct");
+  if (!form) return;
+
+  form.addEventListener("submit", async function(event) {
+    event.preventDefault();
+
+    const categorySelect = form.querySelector('select[name="category"]');
+    let categoryId;
+    try {
+      categoryId = getRequiredCategoryId(categorySelect);
+    } catch (err) {
+      alert(err.message || "Kategori seçimi geçersiz");
+      return;
+    }
+
+    const imageInput = form.querySelector('input[name="image"]');
+    const imageFile = imageInput?.files?.[0];
+    if (!imageFile) {
+      alert("Ürün görseli yükle");
+      return;
+    }
+
+    const formData = new FormData(form);
+    if (!categoryId) {
+      throw new Error("category_id required");
+    }
+    formData.set("category_id", categoryId);
+    if (!formData.get("category_id")) {
+      throw new Error("category_id required");
+    }
+    logFormData(formData);
+
+    const res = await fetch("/admin/api/products", {
+      method: "POST",
+      headers: authHeadersMultipart(),
+      body: formData
+    });
+
+    const body = await safeJson(res);
+    console.log("Create product response:", res.status, body);
   });
-
-  const body = await safeJson(res);
-  console.log("Create product response:", res.status, body);
-});
+}
 
 
 document.getElementById("editProduct").addEventListener("submit", async function(event) {
@@ -644,7 +663,8 @@ document.getElementById("editProduct").addEventListener("submit", async function
     return;
   }
 
-  const categories = getSelectedCategories(event.target.querySelector('select[name="category"]'));
+  const categorySelect = event.target.querySelector('select[name="category"]');
+  const categories = getSelectedCategories(categorySelect);
   if (categories.length === 0) {
     alert("En az bir kategori seç");
     return;
@@ -653,18 +673,24 @@ document.getElementById("editProduct").addEventListener("submit", async function
   const barcode = normalizeBarcode(form.get("barcode"));
   const imageInput = event.target.querySelector('input[name="image"]');
   const imageFile = imageInput && imageInput.files ? imageInput.files[0] : null;
-  const updatePayload = buildProductFormData({
-    name: form.get("name"),
-    price: price,
-    brand: normalizeBrand(form.get("brand")),
-    barcode: barcode,
-    description: normalizeDescription(form.get("description")),
-    stock: stock,
-    categoryIds: categories,
-    imageFile: imageFile,
-    isCampaign: form.get("isCampaign") === "on",
-    isActive: form.get("isActive") === "on"
-  });
+  let updatePayload;
+  try {
+    updatePayload = buildUpdateProductFormData({
+      name: form.get("name"),
+      price: price,
+      brand: normalizeBrand(form.get("brand")),
+      barcode: barcode,
+      description: normalizeDescription(form.get("description")),
+      stock: stock,
+      categoryIds: categories,
+      imageFile: imageFile,
+      isCampaign: form.get("isCampaign") === "on",
+      isActive: form.get("isActive") === "on"
+    });
+  } catch (err) {
+    alert(err.message || "Kategori seçimi geçersiz");
+    return;
+  }
 
   console.log("Update product payload:", updatePayload);
 
@@ -690,5 +716,6 @@ document.getElementById("deleteProduct").addEventListener("click", async functio
   await handleDeleteProduct(selectedProduct);
 });
 
+initProductCreate();
 loadCategories();
 loadProducts(currentPage);
