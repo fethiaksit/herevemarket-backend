@@ -594,7 +594,14 @@ document.getElementById("addProduct").addEventListener("submit", async function(
   }
 
   const barcode = normalizeBarcode(form.get("barcode"));
-  const createPayload = buildProductPayload({
+  const imageInput = event.target.querySelector('input[name="image"]');
+  const imageFile = imageInput && imageInput.files ? imageInput.files[0] : null;
+  if (!imageFile) {
+    alert("Ürün görseli yükle");
+    return;
+  }
+
+  const createPayload = buildProductFormData({
     name: form.get("name"),
     price: price,
     brand: normalizeBrand(form.get("brand")),
@@ -611,8 +618,8 @@ document.getElementById("addProduct").addEventListener("submit", async function(
 
   const res = await fetch("/admin/api/products", {
     method: "POST",
-    headers: authHeaders(),
-    body: JSON.stringify(createPayload)
+    headers: authHeadersMultipart(),
+    body: createPayload
   });
   console.log("Create product response status:", res.status);
   const createBody = await safeJson(res);
@@ -675,8 +682,8 @@ document.getElementById("editProduct").addEventListener("submit", async function
 
   const res = await fetch("/admin/api/products/" + id, {
     method: "PUT",
-    headers: authHeaders(),
-    body: JSON.stringify(updatePayload)
+    headers: authHeadersMultipart(),
+    body: updatePayload
   });
   console.log("Update product response status:", res.status);
   const updateBody = await safeJson(res);
