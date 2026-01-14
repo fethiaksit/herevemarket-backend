@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log"
 	"math"
@@ -29,7 +28,6 @@ type ProductCreateRequest struct {
 	Name        string   `json:"name" binding:"required"`
 	Price       float64  `json:"price" binding:"required"`
 	Category    []string `json:"category" binding:"required"`
-	ImageURL    string   `json:"imageUrl" binding:"required"`
 	Description string   `json:"description"`
 	Barcode     string   `json:"barcode"`
 	Brand       string   `json:"brand"`
@@ -42,7 +40,6 @@ type ProductUpdateRequest struct {
 	Name        *string   `json:"name"`
 	Price       *float64  `json:"price"`
 	Category    *[]string `json:"category"`
-	ImageURL    *string   `json:"imageUrl"`
 	Description *string   `json:"description"`
 	Barcode     *string   `json:"barcode"`
 	Brand       *string   `json:"brand"`
@@ -154,7 +151,7 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log.Println("CreateProduct: request received")
 		if strings.HasPrefix(c.GetHeader("Content-Type"), "multipart/form-data") {
-			input, err := parseMultipartProductRequest(c, true)
+			input, err := parseMultipartProductRequest(c, false)
 			if err != nil {
 				log.Println("CreateProduct multipart error:", err)
 				respondMultipartError(c, err)
@@ -198,17 +195,6 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 				isCampaign = input.IsCampaign
 			}
 
-			imageURL, err := uploadToCloudinary(c.Request.Context(), input.ImageData, input.ImageFilename, input.ImageContentType)
-			if err != nil {
-				log.Println("CreateProduct upload error:", err)
-				if errors.Is(err, errMissingCloudinary) {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "cloudinary config missing"})
-					return
-				}
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "image upload failed"})
-				return
-			}
-
 			now := time.Now()
 			barcode := strings.TrimSpace(input.Barcode)
 			brand := strings.TrimSpace(input.Brand)
@@ -218,7 +204,6 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 				Name:        name,
 				Price:       input.Price,
 				Category:    models.StringList(categories),
-				ImageURL:    imageURL,
 				Description: description,
 				Barcode:     barcode,
 				Brand:       brand,
@@ -320,7 +305,6 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 			Name:        req.Name,
 			Price:       req.Price,
 			Category:    models.StringList(categories),
-			ImageURL:    req.ImageURL,
 			Description: description,
 			Barcode:     barcode,
 			Brand:       brand,
@@ -399,19 +383,6 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 					return
 				}
 				updateSet["category"] = models.StringList(cats)
-			}
-			if input.ImageSet {
-				imageURL, err := uploadToCloudinary(c.Request.Context(), input.ImageData, input.ImageFilename, input.ImageContentType)
-				if err != nil {
-					log.Println("UpdateProduct upload error:", err)
-					if errors.Is(err, errMissingCloudinary) {
-						c.JSON(http.StatusInternalServerError, gin.H{"error": "cloudinary config missing"})
-						return
-					}
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "image upload failed"})
-					return
-				}
-				updateSet["imageUrl"] = imageURL
 			}
 			if input.DescriptionSet {
 				updateSet["description"] = strings.TrimSpace(input.Description)
@@ -567,9 +538,6 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 
 			updateSet["category"] = models.StringList(cats)
 
-		}
-		if req.ImageURL != nil {
-			updateSet["imageUrl"] = *req.ImageURL
 		}
 		if req.Description != nil {
 			updateSet["description"] = strings.TrimSpace(*req.Description)
