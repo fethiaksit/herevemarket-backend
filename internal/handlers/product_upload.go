@@ -14,6 +14,12 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+/*
+=======================
+  INPUT STRUCT
+=======================
+*/
+
 type MultipartProductInput struct {
 	Name           string
 	NameSet        bool
@@ -37,6 +43,12 @@ type MultipartProductInput struct {
 	IsCampaignSet  bool
 }
 
+/*
+=======================
+  PARSER
+=======================
+*/
+
 func parseMultipartProductRequest(c *gin.Context) (MultipartProductInput, error) {
 	if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
 		return MultipartProductInput{}, err
@@ -44,13 +56,32 @@ func parseMultipartProductRequest(c *gin.Context) (MultipartProductInput, error)
 
 	input := MultipartProductInput{}
 
+	// ---- STRING FIELDS ----
+
 	if value, ok := c.GetPostForm("name"); ok {
-		input.Name = value
+		input.Name = strings.TrimSpace(value)
 		input.NameSet = true
 	}
 
+	if value, ok := c.GetPostForm("description"); ok {
+		input.Description = strings.TrimSpace(value)
+		input.DescriptionSet = true
+	}
+
+	if value, ok := c.GetPostForm("barcode"); ok {
+		input.Barcode = strings.TrimSpace(value)
+		input.BarcodeSet = true
+	}
+
+	if value, ok := c.GetPostForm("brand"); ok {
+		input.Brand = strings.TrimSpace(value)
+		input.BrandSet = true
+	}
+
+	// ---- NUMBER FIELDS ----
+
 	if value, ok := c.GetPostForm("price"); ok {
-		parsed, err := strconv.ParseFloat(value, 64)
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
 		if err != nil {
 			return MultipartProductInput{}, err
 		}
@@ -58,35 +89,16 @@ func parseMultipartProductRequest(c *gin.Context) (MultipartProductInput, error)
 		input.PriceSet = true
 	}
 
-	categoryIDs := c.PostFormArray("category_id")
-	if _, ok := c.Request.MultipartForm.Value["category_id"]; ok {
-		input.CategoryIDs = categoryIDs
-		input.CategoryIDSet = true
-	}
-
-	if value, ok := c.GetPostForm("description"); ok {
-		input.Description = value
-		input.DescriptionSet = true
-	}
-
-	if value, ok := c.GetPostForm("barcode"); ok {
-		input.Barcode = value
-		input.BarcodeSet = true
-	}
-
-	if value, ok := c.GetPostForm("brand"); ok {
-		input.Brand = value
-		input.BrandSet = true
-	}
-
 	if value, ok := c.GetPostForm("stock"); ok {
-		parsed, err := strconv.Atoi(value)
+		parsed, err := strconv.Atoi(strings.TrimSpace(value))
 		if err != nil {
 			return MultipartProductInput{}, err
 		}
 		input.Stock = parsed
 		input.StockSet = true
 	}
+
+	// ---- BOOL FIELDS ----
 
 	if value, ok := c.GetPostForm("isActive"); ok {
 		parsed, err := parseBoolValue(value)
@@ -106,6 +118,16 @@ func parseMultipartProductRequest(c *gin.Context) (MultipartProductInput, error)
 		input.IsCampaignSet = true
 	}
 
+	// ---- CATEGORY IDS (CRITICAL FIX) ----
+
+	categoryIDs := c.PostFormArray("category_id")
+	if len(categoryIDs) > 0 {
+		input.CategoryIDs = categoryIDs
+		input.CategoryIDSet = true
+	}
+
+	// ---- IMAGE FILE ----
+
 	file, err := c.FormFile("image")
 	if err == nil {
 		imagePath, err := saveImage(file)
@@ -114,39 +136,59 @@ func parseMultipartProductRequest(c *gin.Context) (MultipartProductInput, error)
 		}
 		input.ImagePath = imagePath
 		input.ImageSet = true
-	} else if !errors.Is(err, http.ErrMissingFile) {
-		return MultipartProductInput{}, err
+	} else {
+		// toleranslı hata kontrolü (Gin sürümleri farkı)
+		if !errors.Is(err, http.ErrMissingFile) &&
+			!strings.Contains(err.Error(), "no such file") {
+			return MultipartProductInput{}, err
+		}
 	}
 
 	return input, nil
 }
 
+/*
+=======================
+  IMAGE SAVE
+=======================
+*/
+
 func saveImage(file *multipart.FileHeader) (string, error) {
 	extension := strings.ToLower(filepath.Ext(file.Filename))
 	filename := primitive.NewObjectID().Hex() + extension
+
 	dir := filepath.Join("public", "uploads", "products")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	path := filepath.Join(dir, filename)
-	output, err := os.Create(path)
+
+	fullPath := filepath.Join(dir, filename)
+
+	out, err := os.Create(fullPath)
 	if err != nil {
 		return "", err
 	}
-	defer output.Close()
+	defer out.Close()
 
-	input, err := file.Open()
+	in, err := file.Open()
 	if err != nil {
 		return "", err
 	}
-	defer input.Close()
+	defer in.Close()
 
-	if _, err := io.Copy(output, input); err != nil {
+	if _, err := io.Copy(out, in); err != nil {
 		return "", err
 	}
 
+	// DB’ye yazılacak path
 	return filepath.ToSlash(filepath.Join("uploads", "products", filename)), nil
 }
+
+/*
+=======================
+  HELPERS
+=======================
+*/
 
 func parseBoolValue(value string) (bool, error) {
 	value = strings.TrimSpace(strings.ToLower(value))
