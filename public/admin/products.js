@@ -124,26 +124,15 @@ async function populateProductCategorySelects(selectedValues, preloadedCategorie
     def.value = "";
     def.textContent = "Kategori Seç";
     def.disabled = true;
-activeCategories.forEach(function(category, index) {
-  const opt = document.createElement("option");
-  opt.value = getCategoryId(category);
-  opt.textContent = category.name;
-  if (preserved.length === 0 && index === 0) {
-    opt.selected = false; //  otomatik seçme
-  }
-  select.appendChild(opt);
-});    select.appendChild(def);
+    def.selected = preserved.length === 0;
+    select.appendChild(def);
 
     activeCategories.forEach(function(category) {
       const opt = document.createElement("option");
       opt.value = getCategoryId(category);
       opt.textContent = category.name;
+      opt.selected = preserved.includes(String(opt.value));
       select.appendChild(opt);
-    });
-
-    preserved.forEach(function(value) {
-      const opt = Array.from(select.options).find(function(option) { return option.value === value; });
-      if (opt) opt.selected = true;
     });
   });
 }
@@ -614,6 +603,7 @@ document.getElementById("addProduct").addEventListener("submit", async function(
     isActive: true
   });
 
+  console.log("Gönderilen Veri:", createPayload);
   for (const pair of createPayload.entries()) {
     console.log("FORMDATA:", pair[0], pair[1]);
   }
