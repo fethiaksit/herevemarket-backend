@@ -16,8 +16,8 @@ type productFormInput struct {
 	NameSet        bool
 	Price          float64
 	PriceSet       bool
-	Category       []string
-	CategorySet    bool
+	CategoryIDs    []string
+	CategoryIDSet  bool
 	Description    string
 	DescriptionSet bool
 	Barcode        string
@@ -54,7 +54,7 @@ func parseMultipartProductRequest(c *gin.Context) (productFormInput, error) {
 			continue
 		}
 
-		if name == "image" {
+		if part.FileName() != "" {
 			if _, err := io.Copy(io.Discard, part); err != nil {
 				return productFormInput{}, err
 			}
@@ -77,11 +77,11 @@ func parseMultipartProductRequest(c *gin.Context) (productFormInput, error) {
 			}
 			input.Price = parsed
 			input.PriceSet = true
-		case "category":
+		case "category_id":
 			if value != "" {
-				input.Category = append(input.Category, value)
+				input.CategoryIDs = append(input.CategoryIDs, value)
 			}
-			input.CategorySet = true
+			input.CategoryIDSet = true
 		case "description":
 			input.Description = value
 			input.DescriptionSet = true
