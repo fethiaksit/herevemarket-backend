@@ -33,12 +33,14 @@
       <form id="addProduct">
         <label>Ürün Adı</label>
         <input name="name" placeholder="Ürün adı" required>
-        <label>Fiyat</label>
-        <input name="price" placeholder="Fiyat (örn: 24.90)" required>
         <label>Kategori</label>
         <select name="category_id" id="addProductCategorySelect" class="product-category-select" required>
-          <option value="">Kategori Seç</option>
+          <option value="" disabled selected>Kategori Seç</option>
         </select>
+        <label>Stok</label>
+        <input name="stock" type="number" min="0" step="1" placeholder="Stok" required>
+        <label>Ürün Açıklaması</label>
+        <textarea name="description" rows="3" placeholder="Ürün açıklaması" required></textarea>
         <label>Görsel Yükle (Opsiyonel)</label>
         <input type="file" name="image" accept="image/*" multiple>
         <button type="submit">Ekle</button>

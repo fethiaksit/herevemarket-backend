@@ -84,6 +84,15 @@ function getCategoryId(category) {
   return category.id || category._id || "";
 }
 
+function toNumericCategoryId(category) {
+  const rawId = getCategoryId(category);
+  const numericId = Number(rawId);
+  if (!Number.isFinite(numericId)) {
+    return null;
+  }
+  return String(numericId);
+}
+
 function mapCategoryNamesToIds(values, categories) {
   const lookup = new Map(
     (categories || []).map(function(category) { return [category.name, getCategoryId(category)]; })
@@ -162,8 +171,12 @@ async function populateProductCategorySelects(selectedValues, preloadedCategorie
     select.appendChild(def);
 
     activeCategories.forEach(function(category) {
+      const numericId = toNumericCategoryId(category);
+      if (numericId === null) {
+        return;
+      }
       const opt = document.createElement("option");
-      opt.value = getCategoryId(category);
+      opt.value = numericId;
       opt.textContent = category.name;
       opt.selected = preserved.includes(String(opt.value));
       select.appendChild(opt);
@@ -610,7 +623,11 @@ function getCreateCategoryId(form) {
   if (!value) {
     throw new Error("category_id required");
   }
-  return value;
+  const numericId = Number(value);
+  if (!Number.isFinite(numericId)) {
+    throw new Error("category_id required");
+  }
+  return String(numericId);
 }
 
 function logCreateFormData(formData) {
@@ -621,16 +638,30 @@ function logCreateFormData(formData) {
 }
 
 function buildCreateProductFormData(form) {
-  const formData = new FormData(form);
+  const formData = new FormData();
+  const name = String(form.querySelector('input[name="name"]')?.value || "").trim();
+  const stockValue = String(form.querySelector('input[name="stock"]')?.value || "").trim();
+  const description = String(form.querySelector('textarea[name="description"]')?.value || "").trim();
   const categoryId = getCreateCategoryId(form);
-  formData.set("category_id", categoryId);
+
+  if (!name) {
+    throw new Error("Ürün adı gerekli");
+  }
+  if (!stockValue) {
+    throw new Error("Stok gerekli");
+  }
+  if (!description) {
+    throw new Error("Ürün açıklaması gerekli");
+  }
+
+  formData.append("name", name);
+  formData.append("stock", stockValue);
+  formData.append("description", description);
+  formData.append("category_id", categoryId);
 
   const imageInput = form.querySelector('input[name="image"]');
   const files = imageInput && imageInput.files ? Array.from(imageInput.files) : [];
-  if (files.length === 0) {
-    formData.delete("image");
-  } else {
-    formData.delete("image");
+  if (files.length > 0) {
     files.forEach(function(file) {
       formData.append("image", file, file.name);
     });
