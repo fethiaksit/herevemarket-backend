@@ -124,8 +124,15 @@ async function populateProductCategorySelects(selectedValues, preloadedCategorie
     def.value = "";
     def.textContent = "Kategori Seç";
     def.disabled = true;
-    if (preserved.length === 0) def.selected = true;
-    select.appendChild(def);
+activeCategories.forEach(function(category, index) {
+  const opt = document.createElement("option");
+  opt.value = getCategoryId(category);
+  opt.textContent = category.name;
+  if (preserved.length === 0 && index === 0) {
+    opt.selected = false; //  otomatik seçme
+  }
+  select.appendChild(opt);
+});    select.appendChild(def);
 
     activeCategories.forEach(function(category) {
       const opt = document.createElement("option");
