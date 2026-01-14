@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"math"
@@ -25,9 +26,9 @@ import (
 ======================= */
 
 type ProductCreateRequest struct {
-	Name        string   `json:"name" binding:"required"`
-	Price       float64  `json:"price" binding:"required"`
-	Category    []string `json:"category" binding:"required"`
+	Name        string   `json:"name"`
+	Price       float64  `json:"price"`
+	CategoryIDs []string `json:"category_id"`
 	Description string   `json:"description"`
 	Barcode     string   `json:"barcode"`
 	Brand       string   `json:"brand"`
@@ -39,7 +40,7 @@ type ProductCreateRequest struct {
 type ProductUpdateRequest struct {
 	Name        *string   `json:"name"`
 	Price       *float64  `json:"price"`
-	Category    *[]string `json:"category"`
+	CategoryIDs *[]string `json:"category_id"`
 	Description *string   `json:"description"`
 	Barcode     *string   `json:"barcode"`
 	Brand       *string   `json:"brand"`
@@ -68,6 +69,63 @@ func normalizeCategories(values []string) []string {
 		out = append(out, name)
 	}
 	return out
+}
+
+func resolveCategoryNamesByIDs(ctx context.Context, db *mongo.Database, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("category_id required")
+	}
+
+	seen := map[primitive.ObjectID]struct{}{}
+	ordered := make([]primitive.ObjectID, 0, len(ids))
+	unique := make([]primitive.ObjectID, 0, len(ids))
+
+	for _, raw := range ids {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		objectID, err := primitive.ObjectIDFromHex(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid category_id: %s", value)
+		}
+		if _, ok := seen[objectID]; ok {
+			continue
+		}
+		seen[objectID] = struct{}{}
+		ordered = append(ordered, objectID)
+		unique = append(unique, objectID)
+	}
+
+	if len(unique) == 0 {
+		return nil, fmt.Errorf("category_id required")
+	}
+
+	cursor, err := db.Collection("categories").Find(ctx, bson.M{"_id": bson.M{"$in": unique}})
+	if err != nil {
+		return nil, err
+	}
+
+	var categories []models.Category
+	if err := cursor.All(ctx, &categories); err != nil {
+		return nil, err
+	}
+
+	nameByID := make(map[primitive.ObjectID]string, len(categories))
+	for _, category := range categories {
+		nameByID[category.ID] = category.Name
+	}
+
+	names := make([]string, 0, len(ordered))
+	for _, objectID := range ordered {
+		name, ok := nameByID[objectID]
+		if !ok {
+			return nil, fmt.Errorf("category not found: %s", objectID.Hex())
+		}
+		names = append(names, name)
+	}
+
+	return names, nil
 }
 
 /* =======================
@@ -169,11 +227,17 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 				return
 			}
 
-			categories := normalizeCategories(input.Category)
-			if !input.CategorySet || len(categories) == 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "category required"})
+			if !input.CategoryIDSet {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "category_id required"})
 				return
 			}
+
+			categoryNames, err := resolveCategoryNamesByIDs(context.Background(), db, input.CategoryIDs)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			categories := normalizeCategories(categoryNames)
 
 			if !input.StockSet {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "stock required"})
@@ -221,11 +285,11 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 				log.Println("CreateProduct insert error:", err)
 				if mongo.IsDuplicateKeyError(err) {
 					log.Println("CreateProduct RETURN 409:", err)
-					c.JSON(http.StatusConflict, gin.H{"error": "barcode already exists"})
+					c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 					return
 				}
 				log.Println("CreateProduct RETURN 500:", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
 
@@ -254,7 +318,8 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 		}
 		log.Printf("CreateProduct parsed request: %+v", req)
 
-		if strings.TrimSpace(req.Name) == "" {
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
 			log.Println("CreateProduct RETURN 400:", "name required")
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
 			return
@@ -266,12 +331,13 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
-		categories := normalizeCategories(req.Category)
-		if len(categories) == 0 {
-			log.Println("CreateProduct RETURN 400:", "category required")
-			c.JSON(http.StatusBadRequest, gin.H{"error": "category required"})
+		categoryNames, err := resolveCategoryNamesByIDs(context.Background(), db, req.CategoryIDs)
+		if err != nil {
+			log.Println("CreateProduct RETURN 400:", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		categories := normalizeCategories(categoryNames)
 
 		if req.Stock == nil {
 			log.Println("CreateProduct RETURN 400:", "stock required")
@@ -302,7 +368,7 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 		description := strings.TrimSpace(req.Description)
 
 		product := models.Product{
-			Name:        req.Name,
+			Name:        name,
 			Price:       req.Price,
 			Category:    models.StringList(categories),
 			Description: description,
@@ -322,11 +388,11 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 			log.Println("CreateProduct insert error:", err)
 			if mongo.IsDuplicateKeyError(err) {
 				log.Println("CreateProduct RETURN 409:", err)
-				c.JSON(http.StatusConflict, gin.H{"error": "barcode already exists"})
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 				return
 			}
 			log.Println("CreateProduct RETURN 500:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -376,13 +442,13 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 				}
 				updateSet["price"] = input.Price
 			}
-			if input.CategorySet {
-				cats := normalizeCategories(input.Category)
-				if len(cats) == 0 {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "category required"})
+			if input.CategoryIDSet {
+				categoryNames, err := resolveCategoryNamesByIDs(context.Background(), db, input.CategoryIDs)
+				if err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 					return
 				}
-				updateSet["category"] = models.StringList(cats)
+				updateSet["category"] = models.StringList(normalizeCategories(categoryNames))
 			}
 			if input.DescriptionSet {
 				updateSet["description"] = strings.TrimSpace(input.Description)
@@ -528,16 +594,14 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 			}
 			updateSet["price"] = *req.Price
 		}
-		if req.Category != nil {
-			cats := normalizeCategories(*req.Category)
-			if len(cats) == 0 {
-				log.Println("UpdateProduct RETURN 400:", "category required")
-				c.JSON(http.StatusBadRequest, gin.H{"error": "category required"})
+		if req.CategoryIDs != nil {
+			categoryNames, err := resolveCategoryNamesByIDs(context.Background(), db, *req.CategoryIDs)
+			if err != nil {
+				log.Println("UpdateProduct RETURN 400:", err)
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-
-			updateSet["category"] = models.StringList(cats)
-
+			updateSet["category"] = models.StringList(normalizeCategories(categoryNames))
 		}
 		if req.Description != nil {
 			updateSet["description"] = strings.TrimSpace(*req.Description)
