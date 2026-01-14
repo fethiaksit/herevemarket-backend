@@ -6,6 +6,7 @@ let currentPage = 1;
 let totalPages = 1;
 let totalCount = 0;
 const pageSize = 20;
+let cachedCategories = [];
 
 function setProductStatus(text) {
   setText("productStatus", text || "");
@@ -52,16 +53,30 @@ function normalizeDescription(value) {
   return String(value).trim();
 }
 
+function getCategoryId(category) {
+  if (!category) return "";
+  return category.id || category._id || "";
+}
+
+function mapCategoryNamesToIds(values, categories) {
+  const lookup = new Map(
+    (categories || []).map(function(category) { return [category.name, getCategoryId(category)]; })
+  );
+  return (values || [])
+    .map(function(value) { return lookup.get(value); })
+    .filter(function(value) { return !!value; });
+}
+
 function buildProductFormData(values) {
   const formData = new FormData();
   formData.set("name", values.name);
   formData.set("price", String(values.price));
+  formData.set("stock", String(values.stock));
   formData.set("brand", values.brand || "");
   formData.set("barcode", values.barcode || "");
   formData.set("description", values.description || "");
-  formData.set("stock", String(values.stock));
-  values.categories.forEach(function(category) {
-    formData.append("category", category);
+  values.categoryIds.forEach(function(categoryId) {
+    formData.append("category_id", categoryId);
   });
   if (values.isCampaign !== undefined) {
     formData.set("isCampaign", values.isCampaign ? "true" : "false");
@@ -92,13 +107,16 @@ async function populateProductCategorySelects(selectedValues, preloadedCategorie
   }
 
   const activeCategories = (categories || []).filter(function(category) { return category && category.isActive; });
-  const activeNames = new Set(activeCategories.map(function(category) { return category.name; }));
+  const activeIds = new Set(activeCategories.map(function(category) { return String(getCategoryId(category)); }));
 
   // Eğer hedef belirtildiyse onu, yoksa hepsini seç (eski uyumluluk)
   const selects = targetSelect ? [targetSelect] : document.querySelectorAll(".product-category-select");
 
   selects.forEach(function(select) {
-    const preserved = desiredSelection.length > 0 ? desiredSelection : getSelectedCategories(select);
+    const previousSelection = desiredSelection.length > 0 ? desiredSelection : getSelectedCategories(select);
+    const preserved = previousSelection.some(function(value) { return activeIds.has(String(value)); })
+      ? previousSelection
+      : mapCategoryNamesToIds(previousSelection, activeCategories);
     select.innerHTML = "";
     select.multiple = true;
 
@@ -111,13 +129,12 @@ async function populateProductCategorySelects(selectedValues, preloadedCategorie
 
     activeCategories.forEach(function(category) {
       const opt = document.createElement("option");
-      opt.value = category.name;
+      opt.value = getCategoryId(category);
       opt.textContent = category.name;
       select.appendChild(opt);
     });
 
     preserved.forEach(function(value) {
-      if (!activeNames.has(value)) return;
       const opt = Array.from(select.options).find(function(option) { return option.value === value; });
       if (opt) opt.selected = true;
     });
@@ -132,6 +149,7 @@ async function loadCategories() {
   if (handleUnauthorized(res)) return;
   const payload = await safeJson(res);
   const data = (payload && payload.data) ? payload.data : (payload || []);
+  cachedCategories = Array.isArray(data) ? data : [];
 
   // ✅ Sadece "Yeni Ürün Ekle" formundaki select'i doldur
   const addProductSelect = document.getElementById("addProductCategorySelect");
@@ -500,7 +518,7 @@ async function selectProduct(product) {
   // ✅ Sadece Düzenleme Formunun Select'ini güncelle
   const editSelect = document.getElementById("editProductCategorySelect");
   if (editSelect) {
-    await populateProductCategorySelects(categories, undefined, editSelect);
+    await populateProductCategorySelects(categories, cachedCategories, editSelect);
   }
 
   const form = document.getElementById("editProduct");
@@ -509,7 +527,6 @@ async function selectProduct(product) {
   form.elements.brand.value = product.brand || "";
   form.elements.barcode.value = product.barcode || "";
   form.elements.stock.value = (product.stock ?? "");
-  form.elements.imageUrl.value = product.imageUrl || "";
   form.elements.description.value = product.description || "";
   form.elements.isCampaign.checked = !!product.isCampaign;
   form.elements.isActive.checked = !!product.isActive;
@@ -591,7 +608,7 @@ document.getElementById("addProduct").addEventListener("submit", async function(
     barcode: barcode,
     description: normalizeDescription(form.get("description")),
     stock: stock,
-    categories: categories,
+    categoryIds: categories,
     imageFile: imageFile,
     isCampaign: form.get("isCampaign") === "on",
     isActive: true
@@ -648,7 +665,6 @@ document.getElementById("editProduct").addEventListener("submit", async function
   const barcode = normalizeBarcode(form.get("barcode"));
   const imageInput = event.target.querySelector('input[name="image"]');
   const imageFile = imageInput && imageInput.files ? imageInput.files[0] : null;
-
   const updatePayload = buildProductFormData({
     name: form.get("name"),
     price: price,
@@ -656,7 +672,7 @@ document.getElementById("editProduct").addEventListener("submit", async function
     barcode: barcode,
     description: normalizeDescription(form.get("description")),
     stock: stock,
-    categories: categories,
+    categoryIds: categories,
     imageFile: imageFile,
     isCampaign: form.get("isCampaign") === "on",
     isActive: form.get("isActive") === "on"
