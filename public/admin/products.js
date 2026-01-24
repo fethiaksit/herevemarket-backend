@@ -86,11 +86,10 @@ function getCategoryId(category) {
 
 function toNumericCategoryId(category) {
   const rawId = getCategoryId(category);
-  const numericId = Number(rawId);
-  if (!Number.isFinite(numericId)) {
+  if (!rawId) {
     return null;
   }
-  return String(numericId);
+  return String(rawId);
 }
 
 function mapCategoryNamesToIds(values, categories) {
@@ -143,9 +142,13 @@ async function populateProductCategorySelects(selectedValues, preloadedCategorie
   let categories = categoryData;
 
   if (!categories) {
-    const res = await fetch("/categories");
+    const res = await fetch("/admin/api/categories", { headers: authHeaders() });
     if (handleUnauthorized(res)) return;
     const payload = await safeJson(res);
+    if (!res.ok) {
+      console.error("Kategori listesi alınamadı:", res.status, payload);
+      return;
+    }
     categories = (payload && payload.data) ? payload.data : (payload || []);
   }
 
@@ -188,11 +191,24 @@ async function loadCategories() {
   const filterSelect = document.getElementById("categoryFilter");
   const preserved = filterSelect ? filterSelect.value : "";
 
-  const res = await fetch("/categories");
+  let res;
+  try {
+    res = await fetch("/admin/api/categories", { headers: authHeaders() });
+  } catch (err) {
+    console.error("Kategori listesi alınamadı:", err);
+    alert("Kategoriler yüklenemedi. Lütfen tekrar deneyin.");
+    return;
+  }
   if (handleUnauthorized(res)) return;
   const payload = await safeJson(res);
+  if (!res.ok) {
+    console.error("Kategori listesi hatası:", res.status, payload);
+    alert("Kategoriler yüklenemedi. Lütfen tekrar deneyin.");
+    return;
+  }
   const data = (payload && payload.data) ? payload.data : (payload || []);
   cachedCategories = Array.isArray(data) ? data : [];
+  console.log("Kategori listesi yüklendi:", cachedCategories.length);
 
   // ✅ Sadece "Yeni Ürün Ekle" formundaki select'i doldur
   const addProductSelect = document.getElementById("addProductCategorySelect");
@@ -623,11 +639,7 @@ function getCreateCategoryId(form) {
   if (!value) {
     throw new Error("category_id required");
   }
-  const numericId = Number(value);
-  if (!Number.isFinite(numericId)) {
-    throw new Error("category_id required");
-  }
-  return String(numericId);
+  return value;
 }
 
 function logCreateFormData(formData) {
