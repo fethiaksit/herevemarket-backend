@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 
@@ -23,6 +24,14 @@ func main() {
 	db := client.Database(config.AppEnv.DBName)
 
 	log.Println("MongoDB connected to:", db.Name())
+
+	if os.Getenv("RUN_MIGRATION") == "categoryIds" {
+		log.Println("Running categoryIds migration")
+		if err := database.RunCategoryIDMigration(context.Background(), db); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	if err := database.EnsureProductIndexes(db); err != nil {
 		log.Println("⚠️ product index warning: %v", err)
