@@ -1,11 +1,9 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"io"
+	"fmt"
 	"log"
 	"math"
 	"net/http"
@@ -25,24 +23,10 @@ import (
    REQUEST MODELLERİ
 ======================= */
 
-type ProductCreateRequest struct {
-	Name        string   `json:"name" binding:"required"`
-	Price       float64  `json:"price" binding:"required"`
-	Category    []string `json:"category" binding:"required"`
-	ImageURL    string   `json:"imageUrl" binding:"required"`
-	Description string   `json:"description"`
-	Barcode     string   `json:"barcode"`
-	Brand       string   `json:"brand"`
-	Stock       *int     `json:"stock"`
-	IsActive    *bool    `json:"isActive"`
-	IsCampaign  *bool    `json:"isCampaign"`
-}
-
 type ProductUpdateRequest struct {
 	Name        *string   `json:"name"`
 	Price       *float64  `json:"price"`
-	Category    *[]string `json:"category"`
-	ImageURL    *string   `json:"imageUrl"`
+	CategoryIDs *[]string `json:"category_id"`
 	Description *string   `json:"description"`
 	Barcode     *string   `json:"barcode"`
 	Brand       *string   `json:"brand"`
@@ -71,6 +55,63 @@ func normalizeCategories(values []string) []string {
 		out = append(out, name)
 	}
 	return out
+}
+
+func resolveCategoryNamesByIDs(ctx context.Context, db *mongo.Database, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("category_id required")
+	}
+
+	seen := map[primitive.ObjectID]struct{}{}
+	ordered := make([]primitive.ObjectID, 0, len(ids))
+	unique := make([]primitive.ObjectID, 0, len(ids))
+
+	for _, raw := range ids {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		objectID, err := primitive.ObjectIDFromHex(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid category_id: %s", value)
+		}
+		if _, ok := seen[objectID]; ok {
+			continue
+		}
+		seen[objectID] = struct{}{}
+		ordered = append(ordered, objectID)
+		unique = append(unique, objectID)
+	}
+
+	if len(unique) == 0 {
+		return nil, fmt.Errorf("category_id required")
+	}
+
+	cursor, err := db.Collection("categories").Find(ctx, bson.M{"_id": bson.M{"$in": unique}})
+	if err != nil {
+		return nil, err
+	}
+
+	var categories []models.Category
+	if err := cursor.All(ctx, &categories); err != nil {
+		return nil, err
+	}
+
+	nameByID := make(map[primitive.ObjectID]string, len(categories))
+	for _, category := range categories {
+		nameByID[category.ID] = category.Name
+	}
+
+	names := make([]string, 0, len(ordered))
+	for _, objectID := range ordered {
+		name, ok := nameByID[objectID]
+		if !ok {
+			return nil, fmt.Errorf("category not found: %s", objectID.Hex())
+		}
+		names = append(names, name)
+	}
+
+	return names, nil
 }
 
 /* =======================
@@ -151,181 +192,87 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 ======================= */
 
 func CreateProduct(db *mongo.Database) gin.HandlerFunc {
+
 	return func(c *gin.Context) {
 		log.Println("CreateProduct: request received")
-		if strings.HasPrefix(c.GetHeader("Content-Type"), "multipart/form-data") {
-			input, err := parseMultipartProductRequest(c, true)
-			if err != nil {
-				log.Println("CreateProduct multipart error:", err)
-				respondMultipartError(c, err)
-				return
-			}
-
-			name := strings.TrimSpace(input.Name)
-			if !input.NameSet || name == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
-				return
-			}
-
-			if !input.PriceSet || input.Price <= 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid price"})
-				return
-			}
-
-			categories := normalizeCategories(input.Category)
-			if !input.CategorySet || len(categories) == 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "category required"})
-				return
-			}
-
-			if !input.StockSet {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "stock required"})
-				return
-			}
-
-			if input.Stock < 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "stock must be zero or greater"})
-				return
-			}
-
-			isActive := true
-			if input.IsActiveSet {
-				isActive = input.IsActive
-			}
-
-			isCampaign := false
-			if input.IsCampaignSet {
-				isCampaign = input.IsCampaign
-			}
-
-			imageURL, err := uploadToCloudinary(c.Request.Context(), input.ImageData, input.ImageFilename, input.ImageContentType)
-			if err != nil {
-				log.Println("CreateProduct upload error:", err)
-				if errors.Is(err, errMissingCloudinary) {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "cloudinary config missing"})
-					return
-				}
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "image upload failed"})
-				return
-			}
-
-			now := time.Now()
-			barcode := strings.TrimSpace(input.Barcode)
-			brand := strings.TrimSpace(input.Brand)
-			description := strings.TrimSpace(input.Description)
-
-			product := models.Product{
-				Name:        name,
-				Price:       input.Price,
-				Category:    models.StringList(categories),
-				ImageURL:    imageURL,
-				Description: description,
-				Barcode:     barcode,
-				Brand:       brand,
-				Stock:       input.Stock,
-				InStock:     input.Stock > 0,
-				IsActive:    isActive,
-				IsCampaign:  isCampaign,
-				IsDeleted:   false,
-				CreatedAt:   now,
-			}
-
-			log.Printf("CreateProduct inserting product: %+v", product)
-			res, err := db.Collection("products").InsertOne(context.Background(), product)
-			if err != nil {
-				log.Println("CreateProduct insert error:", err)
-				if mongo.IsDuplicateKeyError(err) {
-					log.Println("CreateProduct RETURN 409:", err)
-					c.JSON(http.StatusConflict, gin.H{"error": "barcode already exists"})
-					return
-				}
-				log.Println("CreateProduct RETURN 500:", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
-				return
-			}
-
-			product.ID = res.InsertedID.(primitive.ObjectID)
-			log.Println("CreateProduct insert success:", res.InsertedID)
-			c.JSON(http.StatusCreated, product)
+		log.Println("=== CREATE PRODUCT HIT ===")
+		log.Println("Content-Type:", c.GetHeader("Content-Type"))
+		log.Println("Form:", c.Request.MultipartForm)
+		if !strings.HasPrefix(c.GetHeader("Content-Type"), "multipart/form-data") {
+			c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "multipart/form-data required"})
 			return
 		}
 
-		body, err := c.GetRawData()
+		input, err := parseMultipartProductRequest(c)
 		if err != nil {
-			log.Println("CreateProduct RETURN 400:", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			log.Println("CreateProduct multipart error:", err)
+			respondMultipartError(c, err)
 			return
 		}
-		log.Println("CreateProduct raw body:", string(body))
 
-		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
-
-		var req ProductCreateRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			log.Println("CreateProduct bind error:", err)
-			log.Println("CreateProduct RETURN 400:", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		log.Printf("CreateProduct parsed request: %+v", req)
-
-		if strings.TrimSpace(req.Name) == "" {
-			log.Println("CreateProduct RETURN 400:", "name required")
+		name := strings.TrimSpace(input.Name)
+		if !input.NameSet || name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
 			return
 		}
 
-		if req.Price <= 0 {
-			log.Println("CreateProduct RETURN 400:", "invalid price")
+		if !input.PriceSet || input.Price <= 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid price"})
 			return
 		}
 
-		categories := normalizeCategories(req.Category)
-		if len(categories) == 0 {
-			log.Println("CreateProduct RETURN 400:", "category required")
-			c.JSON(http.StatusBadRequest, gin.H{"error": "category required"})
+		if !input.CategoryIDSet {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "category_id required"})
 			return
 		}
 
-		if req.Stock == nil {
-			log.Println("CreateProduct RETURN 400:", "stock required")
+		categoryNames, err := resolveCategoryNamesByIDs(context.Background(), db, input.CategoryIDs)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		categories := normalizeCategories(categoryNames)
+
+		if !input.StockSet {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "stock required"})
 			return
 		}
 
-		if *req.Stock < 0 {
-			log.Println("CreateProduct RETURN 400:", "stock must be zero or greater")
+		if input.Stock < 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "stock must be zero or greater"})
 			return
 		}
 
+		if !input.ImageSet || strings.TrimSpace(input.ImagePath) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "image required"})
+			return
+		}
+
 		isActive := true
-		if req.IsActive != nil {
-			isActive = *req.IsActive
+		if input.IsActiveSet {
+			isActive = input.IsActive
 		}
 
 		isCampaign := false
-		if req.IsCampaign != nil {
-			isCampaign = *req.IsCampaign
+		if input.IsCampaignSet {
+			isCampaign = input.IsCampaign
 		}
 
 		now := time.Now()
-
-		barcode := strings.TrimSpace(req.Barcode)
-		brand := strings.TrimSpace(req.Brand)
-		description := strings.TrimSpace(req.Description)
+		barcode := strings.TrimSpace(input.Barcode)
+		brand := strings.TrimSpace(input.Brand)
+		description := strings.TrimSpace(input.Description)
 
 		product := models.Product{
-			Name:        req.Name,
-			Price:       req.Price,
+			Name:        name,
+			Price:       input.Price,
 			Category:    models.StringList(categories),
-			ImageURL:    req.ImageURL,
 			Description: description,
 			Barcode:     barcode,
 			Brand:       brand,
-			Stock:       *req.Stock,
-			InStock:     *req.Stock > 0,
+			ImagePath:   input.ImagePath,
+			Stock:       input.Stock,
+			InStock:     input.Stock > 0,
 			IsActive:    isActive,
 			IsCampaign:  isCampaign,
 			IsDeleted:   false,
@@ -338,11 +285,11 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 			log.Println("CreateProduct insert error:", err)
 			if mongo.IsDuplicateKeyError(err) {
 				log.Println("CreateProduct RETURN 409:", err)
-				c.JSON(http.StatusConflict, gin.H{"error": "barcode already exists"})
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 				return
 			}
 			log.Println("CreateProduct RETURN 500:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -367,7 +314,7 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 		log.Println("UpdateProduct request received for id:", id.Hex())
 
 		if strings.HasPrefix(c.GetHeader("Content-Type"), "multipart/form-data") {
-			input, err := parseMultipartProductRequest(c, false)
+			input, err := parseMultipartProductRequest(c)
 			if err != nil {
 				log.Println("UpdateProduct multipart error:", err)
 				respondMultipartError(c, err)
@@ -392,26 +339,13 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 				}
 				updateSet["price"] = input.Price
 			}
-			if input.CategorySet {
-				cats := normalizeCategories(input.Category)
-				if len(cats) == 0 {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "category required"})
-					return
-				}
-				updateSet["category"] = models.StringList(cats)
-			}
-			if input.ImageSet {
-				imageURL, err := uploadToCloudinary(c.Request.Context(), input.ImageData, input.ImageFilename, input.ImageContentType)
+			if input.CategoryIDSet {
+				categoryNames, err := resolveCategoryNamesByIDs(context.Background(), db, input.CategoryIDs)
 				if err != nil {
-					log.Println("UpdateProduct upload error:", err)
-					if errors.Is(err, errMissingCloudinary) {
-						c.JSON(http.StatusInternalServerError, gin.H{"error": "cloudinary config missing"})
-						return
-					}
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "image upload failed"})
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 					return
 				}
-				updateSet["imageUrl"] = imageURL
+				updateSet["category"] = models.StringList(normalizeCategories(categoryNames))
 			}
 			if input.DescriptionSet {
 				updateSet["description"] = strings.TrimSpace(input.Description)
@@ -426,6 +360,9 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 			}
 			if input.BrandSet {
 				updateSet["brand"] = strings.TrimSpace(input.Brand)
+			}
+			if input.ImageSet && strings.TrimSpace(input.ImagePath) != "" {
+				updateSet["imagePath"] = input.ImagePath
 			}
 			if input.StockSet {
 				if input.Stock < 0 {
@@ -557,19 +494,14 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 			}
 			updateSet["price"] = *req.Price
 		}
-		if req.Category != nil {
-			cats := normalizeCategories(*req.Category)
-			if len(cats) == 0 {
-				log.Println("UpdateProduct RETURN 400:", "category required")
-				c.JSON(http.StatusBadRequest, gin.H{"error": "category required"})
+		if req.CategoryIDs != nil {
+			categoryNames, err := resolveCategoryNamesByIDs(context.Background(), db, *req.CategoryIDs)
+			if err != nil {
+				log.Println("UpdateProduct RETURN 400:", err)
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-
-			updateSet["category"] = models.StringList(cats)
-
-		}
-		if req.ImageURL != nil {
-			updateSet["imageUrl"] = *req.ImageURL
+			updateSet["category"] = models.StringList(normalizeCategories(categoryNames))
 		}
 		if req.Description != nil {
 			updateSet["description"] = strings.TrimSpace(*req.Description)

@@ -31,20 +31,18 @@
     <div>
       <h3>Yeni Ürün</h3>
       <form id="addProduct">
-        <input name="name" placeholder="Ürün adı">
-        <input name="price" placeholder="Fiyat (örn: 24.90)">
-        <input name="brand" placeholder="Marka">
-        <input name="barcode" placeholder="Barkod">
-        <input name="stock" type="number" min="0" step="1" placeholder="Stok">
-        <label><input type="checkbox" name="isCampaign"> Kampanya</label>
-        <select name="category" id="addProductCategorySelect" class="product-category-select" multiple>
-          <option value="">Kategori Seç</option>
+        <label>Ürün Adı</label>
+        <input name="name" placeholder="Ürün adı" required>
+        <label>Kategori</label>
+        <select name="category_id" id="addProductCategorySelect" class="product-category-select" required>
+          <option value="" disabled selected>Kategori Seç</option>
         </select>
+        <label>Stok</label>
+        <input name="stock" type="number" min="0" step="1" placeholder="Stok" required>
         <label>Ürün Açıklaması</label>
-        <textarea name="description" rows="3" placeholder="Ürün açıklaması"></textarea>
-        <input name="imageUrl" placeholder="Görsel URL">
-        <label>Görsel Yükle</label>
-        <input type="file" name="image" accept="image/*">
+        <textarea name="description" rows="3" placeholder="Ürün açıklaması" required></textarea>
+        <label>Görsel Yükle (Opsiyonel)</label>
+        <input type="file" name="image" accept="image/*" multiple>
         <button type="submit">Ekle</button>
       </form>
     </div>
@@ -68,8 +66,6 @@
         <input name="stock" type="number" min="0" step="1" placeholder="Stok">
         <label>Ürün Açıklaması</label>
         <textarea name="description" rows="3" placeholder="Ürün açıklaması"></textarea>
-        <label>Görsel URL</label>
-        <input name="imageUrl" placeholder="Görsel URL">
         <label>Görsel Yükle</label>
         <input type="file" name="image" accept="image/*">
         <label><input type="checkbox" name="isCampaign"> Kampanya</label>

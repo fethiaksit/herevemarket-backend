@@ -53,6 +53,12 @@ function authHeaders() {
   };
 }
 
+function authHeadersMultipart() {
+  return {
+    "Authorization": "Bearer " + getToken(),
+  };
+}
+
 async function safeJson(res) {
   try {
     return await res.json();

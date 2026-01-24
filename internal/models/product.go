@@ -11,10 +11,10 @@ type Product struct {
 	Name        string             `bson:"name" json:"name"`
 	Price       float64            `bson:"price" json:"price"`
 	Category    StringList         `bson:"category" json:"category"`
-	ImageURL    string             `bson:"imageUrl" json:"imageUrl"`
 	Description string             `bson:"description,omitempty" json:"description,omitempty"`
 	Barcode     string             `bson:"barcode,omitempty" json:"barcode,omitempty"`
 	Brand       string             `bson:"brand,omitempty" json:"brand,omitempty"`
+	ImagePath   string             `bson:"imagePath,omitempty" json:"imagePath,omitempty"`
 	Stock       int                `bson:"stock" json:"stock"`
 	InStock     bool               `bson:"-" json:"inStock"`
 	IsActive    bool               `bson:"isActive" json:"isActive"`

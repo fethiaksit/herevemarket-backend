@@ -6,6 +6,7 @@ let currentPage = 1;
 let totalPages = 1;
 let totalCount = 0;
 const pageSize = 20;
+let cachedCategories = [];
 
 function setProductStatus(text) {
   setText("productStatus", text || "");
@@ -31,6 +32,32 @@ function getSelectedCategories(select) {
     .filter(function(value) { return !!value; });
 }
 
+function validateCategorySelect(select) {
+  if (!select) {
+    alert("Kategori seçimi bulunamadı");
+    return { isValid: false, values: [] };
+  }
+
+  const options = Array.from(select.options || []);
+  const missingValueAttribute = options.some(function(option) {
+    return !option.hasAttribute("value");
+  });
+
+  if (missingValueAttribute) {
+    alert("Kategori seçeneklerinde value attribute eksik");
+    return { isValid: false, values: [] };
+  }
+
+  const values = getSelectedCategories(select);
+  console.log("Selected category values:", values);
+  if (values.length === 0) {
+    alert("En az bir kategori seç");
+    return { isValid: false, values: [] };
+  }
+
+  return { isValid: true, values: values };
+}
+
 function parseStockValue(value) {
   const stock = Number(value);
   if (!Number.isFinite(stock) || stock < 0) return null;
@@ -52,16 +79,42 @@ function normalizeDescription(value) {
   return String(value).trim();
 }
 
-function buildProductFormData(values) {
+function getCategoryId(category) {
+  if (!category) return "";
+  return category.id || category._id || "";
+}
+
+function toNumericCategoryId(category) {
+  const rawId = getCategoryId(category);
+  if (!rawId) {
+    return null;
+  }
+  return String(rawId);
+}
+
+function mapCategoryNamesToIds(values, categories) {
+  const lookup = new Map(
+    (categories || []).map(function(category) { return [category.name, getCategoryId(category)]; })
+  );
+  return (values || [])
+    .map(function(value) { return lookup.get(value); })
+    .filter(function(value) { return !!value; });
+}
+
+function buildUpdateProductFormData(values) {
   const formData = new FormData();
   formData.set("name", values.name);
   formData.set("price", String(values.price));
+  formData.set("stock", String(values.stock));
   formData.set("brand", values.brand || "");
   formData.set("barcode", values.barcode || "");
   formData.set("description", values.description || "");
-  formData.set("stock", String(values.stock));
-  values.categories.forEach(function(category) {
-    formData.append("category", category);
+  const categoryIds = normalizeCategoryValues(values.categoryIds);
+  if (categoryIds.length === 0) {
+    throw new Error("category_id required");
+  }
+  categoryIds.forEach(function(categoryId) {
+    formData.append("category_id", categoryId);
   });
   if (values.isCampaign !== undefined) {
     formData.set("isCampaign", values.isCampaign ? "true" : "false");
@@ -71,6 +124,10 @@ function buildProductFormData(values) {
   }
   if (values.imageFile) {
     formData.set("image", values.imageFile, values.imageFile.name);
+  }
+  console.log("FormData entries:");
+  for (const pair of formData.entries()) {
+    console.log("FORMDATA:", pair[0], pair[1]);
   }
   return formData;
 }
@@ -85,41 +142,47 @@ async function populateProductCategorySelects(selectedValues, preloadedCategorie
   let categories = categoryData;
 
   if (!categories) {
-    const res = await fetch("/categories");
+    const res = await fetch("/admin/api/categories", { headers: authHeaders() });
     if (handleUnauthorized(res)) return;
     const payload = await safeJson(res);
+    if (!res.ok) {
+      console.error("Kategori listesi alınamadı:", res.status, payload);
+      return;
+    }
     categories = (payload && payload.data) ? payload.data : (payload || []);
   }
 
   const activeCategories = (categories || []).filter(function(category) { return category && category.isActive; });
-  const activeNames = new Set(activeCategories.map(function(category) { return category.name; }));
+  const activeIds = new Set(activeCategories.map(function(category) { return String(getCategoryId(category)); }));
 
   // Eğer hedef belirtildiyse onu, yoksa hepsini seç (eski uyumluluk)
   const selects = targetSelect ? [targetSelect] : document.querySelectorAll(".product-category-select");
 
   selects.forEach(function(select) {
-    const preserved = desiredSelection.length > 0 ? desiredSelection : getSelectedCategories(select);
+    const previousSelection = desiredSelection.length > 0 ? desiredSelection : getSelectedCategories(select);
+    const preserved = previousSelection.some(function(value) { return activeIds.has(String(value)); })
+      ? previousSelection
+      : mapCategoryNamesToIds(previousSelection, activeCategories);
     select.innerHTML = "";
-    select.multiple = true;
+    select.multiple = select.hasAttribute("multiple");
 
     const def = document.createElement("option");
     def.value = "";
     def.textContent = "Kategori Seç";
     def.disabled = true;
-    if (preserved.length === 0) def.selected = true;
+    def.selected = preserved.length === 0;
     select.appendChild(def);
 
     activeCategories.forEach(function(category) {
+      const numericId = toNumericCategoryId(category);
+      if (numericId === null) {
+        return;
+      }
       const opt = document.createElement("option");
-      opt.value = category.name;
+      opt.value = numericId;
       opt.textContent = category.name;
+      opt.selected = preserved.includes(String(opt.value));
       select.appendChild(opt);
-    });
-
-    preserved.forEach(function(value) {
-      if (!activeNames.has(value)) return;
-      const opt = Array.from(select.options).find(function(option) { return option.value === value; });
-      if (opt) opt.selected = true;
     });
   });
 }
@@ -128,10 +191,24 @@ async function loadCategories() {
   const filterSelect = document.getElementById("categoryFilter");
   const preserved = filterSelect ? filterSelect.value : "";
 
-  const res = await fetch("/categories");
+  let res;
+  try {
+    res = await fetch("/admin/api/categories", { headers: authHeaders() });
+  } catch (err) {
+    console.error("Kategori listesi alınamadı:", err);
+    alert("Kategoriler yüklenemedi. Lütfen tekrar deneyin.");
+    return;
+  }
   if (handleUnauthorized(res)) return;
   const payload = await safeJson(res);
+  if (!res.ok) {
+    console.error("Kategori listesi hatası:", res.status, payload);
+    alert("Kategoriler yüklenemedi. Lütfen tekrar deneyin.");
+    return;
+  }
   const data = (payload && payload.data) ? payload.data : (payload || []);
+  cachedCategories = Array.isArray(data) ? data : [];
+  console.log("Kategori listesi yüklendi:", cachedCategories.length);
 
   // ✅ Sadece "Yeni Ürün Ekle" formundaki select'i doldur
   const addProductSelect = document.getElementById("addProductCategorySelect");
@@ -500,7 +577,7 @@ async function selectProduct(product) {
   // ✅ Sadece Düzenleme Formunun Select'ini güncelle
   const editSelect = document.getElementById("editProductCategorySelect");
   if (editSelect) {
-    await populateProductCategorySelects(categories, undefined, editSelect);
+    await populateProductCategorySelects(categories, cachedCategories, editSelect);
   }
 
   const form = document.getElementById("editProduct");
@@ -509,7 +586,6 @@ async function selectProduct(product) {
   form.elements.brand.value = product.brand || "";
   form.elements.barcode.value = product.barcode || "";
   form.elements.stock.value = (product.stock ?? "");
-  form.elements.imageUrl.value = product.imageUrl || "";
   form.elements.description.value = product.description || "";
   form.elements.isCampaign.checked = !!product.isCampaign;
   form.elements.isActive.checked = !!product.isActive;
@@ -554,67 +630,86 @@ document.getElementById("categoryFilter").addEventListener("change", function() 
   loadProducts(currentPage);
 });
 
-document.getElementById("addProduct").addEventListener("submit", async function(event) {
-  event.preventDefault();
+function getCreateCategoryId(form) {
+  const select = form.querySelector('select[name="category_id"]');
+  if (!select) {
+    throw new Error("Kategori seçimi bulunamadı");
+  }
+  const value = String(select.value || "").trim();
+  if (!value) {
+    throw new Error("category_id required");
+  }
+  return value;
+}
 
-  const form = new FormData(event.target);
-  const price = parseFloat(form.get("price"));
-  if (Number.isNaN(price)) {
-    alert("Fiyat sayı olmalı (örn 24.90)");
-    return;
+function logCreateFormData(formData) {
+  console.log("FormData entries:");
+  for (const pair of formData.entries()) {
+    console.log("FORMDATA:", pair[0], pair[1]);
+  }
+}
+
+function buildCreateProductFormData(form) {
+  const formData = new FormData();
+  const name = String(form.querySelector('input[name="name"]')?.value || "").trim();
+  const stockValue = String(form.querySelector('input[name="stock"]')?.value || "").trim();
+  const description = String(form.querySelector('textarea[name="description"]')?.value || "").trim();
+  const categoryId = getCreateCategoryId(form);
+
+  if (!name) {
+    throw new Error("Ürün adı gerekli");
+  }
+  if (!stockValue) {
+    throw new Error("Stok gerekli");
+  }
+  if (!description) {
+    throw new Error("Ürün açıklaması gerekli");
   }
 
-  const stock = parseStockValue(form.get("stock"));
-  if (stock === null) {
-    alert("Stok 0 veya daha büyük olmalı");
-    return;
+  formData.append("name", name);
+  formData.append("stock", stockValue);
+  formData.append("description", description);
+  formData.append("category_id", categoryId);
+
+  const imageInput = form.querySelector('input[name="image"]');
+  const files = imageInput && imageInput.files ? Array.from(imageInput.files) : [];
+  if (files.length > 0) {
+    files.forEach(function(file) {
+      formData.append("image", file, file.name);
+    });
   }
 
-  const categories = getSelectedCategories(event.target.querySelector('select[name="category"]'));
-  if (categories.length === 0) {
-    alert("En az bir kategori seç");
-    return;
-  }
+  return formData;
+}
 
-  const barcode = normalizeBarcode(form.get("barcode"));
-  const imageInput = event.target.querySelector('input[name="image"]');
-  const imageFile = imageInput && imageInput.files ? imageInput.files[0] : null;
-  if (!imageFile) {
-    alert("Görsel seçmelisiniz");
-    return;
-  }
+function initProductCreate() {
+  const form = document.getElementById("addProduct");
+  if (!form) return;
 
-  const createPayload = buildProductFormData({
-    name: form.get("name"),
-    price: price,
-    brand: normalizeBrand(form.get("brand")),
-    barcode: barcode,
-    description: normalizeDescription(form.get("description")),
-    stock: stock,
-    categories: categories,
-    imageFile: imageFile,
-    isCampaign: form.get("isCampaign") === "on",
-    isActive: true
+  form.addEventListener("submit", async function(event) {
+    event.preventDefault();
+
+    let formData;
+    try {
+      formData = buildCreateProductFormData(form);
+    } catch (err) {
+      alert(err.message || "Kategori seçimi geçersiz");
+      return;
+    }
+
+    logCreateFormData(formData);
+
+    const res = await fetch("/admin/api/products", {
+      method: "POST",
+      headers: authHeadersMultipart(),
+      body: formData
+    });
+
+    const body = await safeJson(res);
+    console.log("Create product response:", res.status, body);
   });
+}
 
-  console.log("Create product payload:", createPayload);
-
-  const res = await fetch("/admin/api/products", {
-    method: "POST",
-    headers: { "Authorization": "Bearer " + getToken() },
-    body: createPayload
-  });
-  console.log("Create product response status:", res.status);
-  const createBody = await safeJson(res);
-  console.log("Create product response body:", createBody);
-  if (!res.ok) {
-    console.error("Create product failed:", createBody || res.statusText);
-  }
-  if (handleUnauthorized(res)) return;
-
-  event.target.reset();
-  loadProducts(currentPage);
-});
 
 document.getElementById("editProduct").addEventListener("submit", async function(event) {
   event.preventDefault();
@@ -639,7 +734,8 @@ document.getElementById("editProduct").addEventListener("submit", async function
     return;
   }
 
-  const categories = getSelectedCategories(event.target.querySelector('select[name="category"]'));
+  const categorySelect = event.target.querySelector('select[name="category"]');
+  const categories = getSelectedCategories(categorySelect);
   if (categories.length === 0) {
     alert("En az bir kategori seç");
     return;
@@ -648,25 +744,30 @@ document.getElementById("editProduct").addEventListener("submit", async function
   const barcode = normalizeBarcode(form.get("barcode"));
   const imageInput = event.target.querySelector('input[name="image"]');
   const imageFile = imageInput && imageInput.files ? imageInput.files[0] : null;
-
-  const updatePayload = buildProductFormData({
-    name: form.get("name"),
-    price: price,
-    brand: normalizeBrand(form.get("brand")),
-    barcode: barcode,
-    description: normalizeDescription(form.get("description")),
-    stock: stock,
-    categories: categories,
-    imageFile: imageFile,
-    isCampaign: form.get("isCampaign") === "on",
-    isActive: form.get("isActive") === "on"
-  });
+  let updatePayload;
+  try {
+    updatePayload = buildUpdateProductFormData({
+      name: form.get("name"),
+      price: price,
+      brand: normalizeBrand(form.get("brand")),
+      barcode: barcode,
+      description: normalizeDescription(form.get("description")),
+      stock: stock,
+      categoryIds: categories,
+      imageFile: imageFile,
+      isCampaign: form.get("isCampaign") === "on",
+      isActive: form.get("isActive") === "on"
+    });
+  } catch (err) {
+    alert(err.message || "Kategori seçimi geçersiz");
+    return;
+  }
 
   console.log("Update product payload:", updatePayload);
 
   const res = await fetch("/admin/api/products/" + id, {
     method: "PUT",
-    headers: { "Authorization": "Bearer " + getToken() },
+    headers: authHeadersMultipart(),
     body: updatePayload
   });
   console.log("Update product response status:", res.status);
@@ -686,5 +787,6 @@ document.getElementById("deleteProduct").addEventListener("click", async functio
   await handleDeleteProduct(selectedProduct);
 });
 
+initProductCreate();
 loadCategories();
 loadProducts(currentPage);
