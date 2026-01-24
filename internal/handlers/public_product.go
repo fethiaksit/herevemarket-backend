@@ -43,7 +43,14 @@ func GetProducts(db *mongo.Database) gin.HandlerFunc {
 			"isDeleted": bson.M{"$ne": true},
 		}
 
-		if category := strings.TrimSpace(c.Query("category")); category != "" {
+		categoryIDs, err := parseCategoryIDQuery(c)
+		if err != nil {
+			respondWithError(c, http.StatusBadRequest, route, err.Error())
+			return
+		}
+		if len(categoryIDs) > 0 {
+			filter["categoryIds"] = bson.M{"$in": categoryIDs}
+		} else if category := strings.TrimSpace(c.Query("category")); category != "" {
 			filter["category"] = bson.M{"$in": []string{category}}
 		}
 

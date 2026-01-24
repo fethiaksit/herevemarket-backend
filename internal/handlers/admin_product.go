@@ -24,24 +24,25 @@ import (
 ======================= */
 
 type ProductUpdateRequest struct {
-	Name        *string   `json:"name"`
-	Price       *float64  `json:"price"`
-	CategoryIDs *[]string `json:"category_id"`
-	Description *string   `json:"description"`
-	Barcode     *string   `json:"barcode"`
-	Brand       *string   `json:"brand"`
-	Stock       *int      `json:"stock"`
-	IsActive    *bool     `json:"isActive"`
-	IsCampaign  *bool     `json:"isCampaign"`
+	Name           *string   `json:"name"`
+	Price          *float64  `json:"price"`
+	CategoryIDs    *[]string `json:"category_id"`
+	CategoryIDsNew *[]string `json:"categoryIds"`
+	Description    *string   `json:"description"`
+	Barcode        *string   `json:"barcode"`
+	Brand          *string   `json:"brand"`
+	Stock          *int      `json:"stock"`
+	IsActive       *bool     `json:"isActive"`
+	IsCampaign     *bool     `json:"isCampaign"`
 }
 
 /* =======================
    HELPERS
 ======================= */
 
-func normalizeCategories(values []string) []string {
+func normalizeCategoryNames(values []string) []string {
 	seen := map[string]struct{}{}
-	out := make([]string, 0)
+	out := make([]string, 0, len(values))
 
 	for _, v := range values {
 		name := strings.TrimSpace(v)
@@ -54,10 +55,40 @@ func normalizeCategories(values []string) []string {
 		seen[name] = struct{}{}
 		out = append(out, name)
 	}
+
 	return out
 }
 
-func resolveCategoryNamesByIDs(ctx context.Context, db *mongo.Database, ids []string) ([]string, error) {
+func parseCategoryObjectIDs(values []string) ([]primitive.ObjectID, error) {
+	seen := map[primitive.ObjectID]struct{}{}
+	out := make([]primitive.ObjectID, 0, len(values))
+
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+
+		objectID, err := primitive.ObjectIDFromHex(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid category_id: %s", value)
+		}
+		if _, ok := seen[objectID]; ok {
+			continue
+		}
+
+		seen[objectID] = struct{}{}
+		out = append(out, objectID)
+	}
+
+	if len(out) == 0 {
+		return nil, fmt.Errorf("category_id required")
+	}
+
+	return out, nil
+}
+
+func resolveCategoryNamesByIDs(ctx context.Context, db *mongo.Database, ids []primitive.ObjectID) ([]string, error) {
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("category_id required")
 	}
@@ -66,15 +97,7 @@ func resolveCategoryNamesByIDs(ctx context.Context, db *mongo.Database, ids []st
 	ordered := make([]primitive.ObjectID, 0, len(ids))
 	unique := make([]primitive.ObjectID, 0, len(ids))
 
-	for _, raw := range ids {
-		value := strings.TrimSpace(raw)
-		if value == "" {
-			continue
-		}
-		objectID, err := primitive.ObjectIDFromHex(value)
-		if err != nil {
-			return nil, fmt.Errorf("invalid category_id: %s", value)
-		}
+	for _, objectID := range ids {
 		if _, ok := seen[objectID]; ok {
 			continue
 		}
@@ -133,7 +156,14 @@ func GetAllProducts(db *mongo.Database) gin.HandlerFunc {
 			"isDeleted": bson.M{"$ne": true},
 		}
 
-		if category := strings.TrimSpace(c.Query("category")); category != "" {
+		categoryIDs, err := parseCategoryIDQuery(c)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if len(categoryIDs) > 0 {
+			filter["categoryIds"] = bson.M{"$in": categoryIDs}
+		} else if category := strings.TrimSpace(c.Query("category")); category != "" {
 			filter["category"] = bson.M{"$in": []string{category}}
 		}
 
@@ -226,12 +256,18 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
-		categoryNames, err := resolveCategoryNamesByIDs(context.Background(), db, input.CategoryIDs)
+		categoryObjectIDs, err := parseCategoryObjectIDs(input.CategoryIDs)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		categories := normalizeCategories(categoryNames)
+
+		categoryNames, err := resolveCategoryNamesByIDs(context.Background(), db, categoryObjectIDs)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		categories := normalizeCategoryNames(categoryNames)
 
 		if !input.StockSet {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "stock required"})
@@ -264,19 +300,21 @@ func CreateProduct(db *mongo.Database) gin.HandlerFunc {
 		description := strings.TrimSpace(input.Description)
 
 		product := models.Product{
-			Name:        name,
-			Price:       input.Price,
-			Category:    models.StringList(categories),
-			Description: description,
-			Barcode:     barcode,
-			Brand:       brand,
-			ImagePath:   input.ImagePath,
-			Stock:       input.Stock,
-			InStock:     input.Stock > 0,
-			IsActive:    isActive,
-			IsCampaign:  isCampaign,
-			IsDeleted:   false,
-			CreatedAt:   now,
+			Name:          name,
+			Price:         input.Price,
+			Category:      models.StringList(categories),
+			CategoryIDs:   categoryObjectIDs,
+			CategoryNames: categories,
+			Description:   description,
+			Barcode:       barcode,
+			Brand:         brand,
+			ImagePath:     input.ImagePath,
+			Stock:         input.Stock,
+			InStock:       input.Stock > 0,
+			IsActive:      isActive,
+			IsCampaign:    isCampaign,
+			IsDeleted:     false,
+			CreatedAt:     now,
 		}
 
 		log.Printf("CreateProduct inserting product: %+v", product)
@@ -340,12 +378,21 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 				updateSet["price"] = input.Price
 			}
 			if input.CategoryIDSet {
-				categoryNames, err := resolveCategoryNamesByIDs(context.Background(), db, input.CategoryIDs)
+				categoryObjectIDs, err := parseCategoryObjectIDs(input.CategoryIDs)
 				if err != nil {
 					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 					return
 				}
-				updateSet["category"] = models.StringList(normalizeCategories(categoryNames))
+
+				categoryNames, err := resolveCategoryNamesByIDs(context.Background(), db, categoryObjectIDs)
+				if err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+				normalizedNames := normalizeCategoryNames(categoryNames)
+				updateSet["categoryIds"] = categoryObjectIDs
+				updateSet["categoryNames"] = normalizedNames
+				updateSet["category"] = models.StringList(normalizedNames)
 			}
 			if input.DescriptionSet {
 				updateSet["description"] = strings.TrimSpace(input.Description)
@@ -494,14 +541,28 @@ func UpdateProduct(db *mongo.Database) gin.HandlerFunc {
 			}
 			updateSet["price"] = *req.Price
 		}
-		if req.CategoryIDs != nil {
-			categoryNames, err := resolveCategoryNamesByIDs(context.Background(), db, *req.CategoryIDs)
+		categoryIDs := req.CategoryIDs
+		if req.CategoryIDsNew != nil {
+			categoryIDs = req.CategoryIDsNew
+		}
+		if categoryIDs != nil {
+			categoryObjectIDs, err := parseCategoryObjectIDs(*categoryIDs)
 			if err != nil {
 				log.Println("UpdateProduct RETURN 400:", err)
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-			updateSet["category"] = models.StringList(normalizeCategories(categoryNames))
+
+			categoryNames, err := resolveCategoryNamesByIDs(context.Background(), db, categoryObjectIDs)
+			if err != nil {
+				log.Println("UpdateProduct RETURN 400:", err)
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			normalizedNames := normalizeCategoryNames(categoryNames)
+			updateSet["categoryIds"] = categoryObjectIDs
+			updateSet["categoryNames"] = normalizedNames
+			updateSet["category"] = models.StringList(normalizedNames)
 		}
 		if req.Description != nil {
 			updateSet["description"] = strings.TrimSpace(*req.Description)

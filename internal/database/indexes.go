@@ -28,6 +28,11 @@ func EnsureProductIndexes(db *mongo.Database) error {
 			}),
 	}
 
+	categoryIDsIndex := mongo.IndexModel{
+		Keys:    bson.D{{Key: "categoryIds", Value: 1}},
+		Options: options.Index().SetName("categoryIds_index"),
+	}
+
 	log.Println("EnsureProductIndexes: creating barcode_unique index")
 	_, err := indexes.CreateOne(ctx, barcodeIndex)
 	if err != nil {
@@ -35,6 +40,14 @@ func EnsureProductIndexes(db *mongo.Database) error {
 		return err
 	}
 	log.Println("EnsureProductIndexes: barcode_unique index created")
+
+	log.Println("EnsureProductIndexes: creating categoryIds_index index")
+	_, err = indexes.CreateOne(ctx, categoryIDsIndex)
+	if err != nil {
+		log.Println("EnsureProductIndexes: categoryIds index error:", err)
+		return err
+	}
+	log.Println("EnsureProductIndexes: categoryIds_index index created")
 	return nil
 }
 
