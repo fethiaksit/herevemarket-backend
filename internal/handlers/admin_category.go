@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -32,6 +33,8 @@ GET /admin/categories
 */
 func GetAllCategories(db *mongo.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		const route = "GET /admin/api/categories"
+		log.Printf("[%s] hit", route)
 		filter := bson.M{}
 
 		// ?isActive=true/false
@@ -56,6 +59,7 @@ func GetAllCategories(db *mongo.Database) gin.HandlerFunc {
 			return
 		}
 
+		log.Printf("[%s] returning %d categories", route, len(categories))
 		c.JSON(http.StatusOK, gin.H{
 			"data": categories,
 		})
